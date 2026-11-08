@@ -352,6 +352,9 @@ class Settings(BaseSettings):
         return self
 
 
+Settings.model_rebuild()
+
+
 # ------------------------------------------------------------------------------
 # Structured JSON Formatter for Production Logging
 # ------------------------------------------------------------------------------
