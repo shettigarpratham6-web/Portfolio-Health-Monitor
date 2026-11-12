@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Agents Module
 Exports all six specialized monitoring agents and their core input/output schemas:
 1. Supervisor Agent

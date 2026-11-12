@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Supervisor Agent
 Orchestrates portfolio monitoring workflow, creates execution plans, delegates to specialized agents,
 and handles task execution and failure recovery.

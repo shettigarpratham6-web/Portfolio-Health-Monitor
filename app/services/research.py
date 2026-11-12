@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 External Financial Research & Web Scraping Service
 Integrates Tavily Web Search, BeautifulSoup4 Sanitization, and Async HTTPX
 """

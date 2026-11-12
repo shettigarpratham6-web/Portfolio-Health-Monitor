@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor – Portfolio Health Monitor
 Unit & Integration Tests for MCP Servers and Client Gateway
 """
 

@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Evidence Source Model
 """
 
@@ -19,19 +19,20 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database.base import Base, TimestampMixin
+from app.database.base import Base, TimestampMixin, ShortIdMixin
 
 if TYPE_CHECKING:
     from app.models.research_event import ResearchEvent
 
 
-class EvidenceSource(Base, TimestampMixin):
+class EvidenceSource(Base, TimestampMixin, ShortIdMixin):
     """
     Primary verifiable source citation corroborating a research event
     (e.g., SEC EDGAR 10-K/10-Q filing, Reuters, Bloomberg, Press Release).
     Preserves original source URLs, publication timestamps, and credibility ratings.
     """
     __tablename__ = "evidence_sources"
+    __short_id_prefix__ = "src"
 
     __table_args__ = (
         UniqueConstraint("research_event_id", "source_url", name="uq_evidence_sources_event_url"),

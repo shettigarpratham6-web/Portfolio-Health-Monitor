@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Database MCP Server
 Exposes Controlled, Validated Database Access Tools via MCP (Zero Arbitrary SQL)
 """

@@ -1,5 +1,5 @@
 """
-AgentX – Unit Tests for LangSmith Tracing & Observability
+Portfolio Health Monitor – Unit Tests for LangSmith Tracing & Observability
 Tests coverage for:
 1. Environment variable setup & configuration toggling
 2. Tracing connectivity verification & status reporting

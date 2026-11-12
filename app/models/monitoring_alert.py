@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Monitoring Alert Model
 """
 
@@ -18,7 +18,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database.base import Base, TimestampMixin
+from app.database.base import Base, TimestampMixin, ShortIdMixin
 
 if TYPE_CHECKING:
     from app.models.company import Company
@@ -51,12 +51,13 @@ class AlertStatus(str, Enum):
     DISMISSED = "DISMISSED"
 
 
-class MonitoringAlert(Base, TimestampMixin):
+class MonitoringAlert(Base, TimestampMixin, ShortIdMixin):
     """
     Actionable alert produced when risk thresholds are breached
     or significant corroborated research events impact portfolio holdings.
     """
     __tablename__ = "monitoring_alerts"
+    __short_id_prefix__ = "alt"
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),

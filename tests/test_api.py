@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor – Portfolio Health Monitor
 API Integration Tests
 """
 
@@ -15,6 +15,7 @@ from app.database import AsyncSessionLocal, engine
 from app.main import app
 from app.models.company import Company
 from app.models.holding import Holding
+from app.models.monitoring_alert import AlertSeverity, AlertStatus, AlertType, MonitoringAlert
 from app.models.portfolio import Portfolio
 from app.models.user import User
 
@@ -183,3 +184,67 @@ async def test_portfolio_lifecycle_and_ownership():
         assert len(detail_data["holdings"]) == 1
         assert detail_data["holdings"][0]["shares"] == "50.000000"
         assert detail_data["holdings"][0]["company_name"] == "Apple Inc"
+
+        # 9. POST /api/v1/portfolios/{portfolio_id}/holdings (Dynamic position creation)
+        res_add_holding = await client.post(
+            f"/api/v1/portfolios/{portfolio_a_id}/holdings",
+            headers=headers_a,
+            json={
+                "ticker": "NVDA",
+                "company_name": "NVIDIA Corporation",
+                "shares": 100,
+                "average_buy_price": 125.50,
+                "current_price": 140.00,
+            },
+        )
+        assert res_add_holding.status_code == 201
+        holding_added = res_add_holding.json()
+        assert holding_added["ticker"] == "NVDA"
+        assert float(holding_added["shares"]) == 100.0
+        assert holding_added["short_id"].startswith("hold_")
+        new_holding_id = holding_added["id"]
+
+        # 10. DELETE /api/v1/portfolios/{portfolio_id}/holdings/{holding_id}
+        res_del_holding = await client.delete(
+            f"/api/v1/portfolios/{portfolio_a_id}/holdings/{new_holding_id}",
+            headers=headers_a,
+        )
+        assert res_del_holding.status_code == 200
+        assert res_del_holding.json()["status"] == "success"
+
+        # 11. PATCH /api/v1/portfolios/{portfolio_id}/alerts/{alert_id} (Alert status update)
+        async with AsyncSessionLocal() as session:
+            alert = MonitoringAlert(
+                portfolio_id=uuid.UUID(portfolio_a_id),
+                title="Test Risk Event",
+                message="Testing alert lifecycle transition",
+                alert_type=AlertType.PORTFOLIO_RISK,
+                severity=AlertSeverity.HIGH,
+                status=AlertStatus.ACTIVE,
+            )
+            session.add(alert)
+            await session.commit()
+            await session.refresh(alert)
+            alert_id = str(alert.id)
+
+        res_patch_alert = await client.patch(
+            f"/api/v1/portfolios/{portfolio_a_id}/alerts/{alert_id}",
+            headers=headers_a,
+            json={"status": "ACKNOWLEDGED"},
+        )
+        assert res_patch_alert.status_code == 200
+        assert res_patch_alert.json()["status"] == "ACKNOWLEDGED"
+        assert res_patch_alert.json()["acknowledged_at"] is not None
+
+        # 12. POST /api/v1/portfolios/{portfolio_id}/chat (Interactive AI Copilot Q&A)
+        res_chat = await client.post(
+            f"/api/v1/portfolios/{portfolio_a_id}/chat",
+            headers=headers_a,
+            json={"query": "What are the active risk alerts for this portfolio?"},
+        )
+        assert res_chat.status_code == 200
+        chat_data = res_chat.json()
+        assert chat_data["portfolio_id"] == portfolio_a_id
+        assert "answer" in chat_data
+        assert len(chat_data["answer"]) > 0
+        assert "non_advisory_notice" in chat_data

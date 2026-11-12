@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Output Safety & Guardrails Validation
 Enforces non-advisory constraints, evidence provenance requirements, validates severity/confidence bounds,
 detects unsupported financial predictions, and classifies statement epistemic certainty.

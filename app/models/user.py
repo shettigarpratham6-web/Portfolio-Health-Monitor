@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 User Model
 """
 
@@ -9,18 +9,19 @@ import uuid
 from sqlalchemy import Boolean, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database.base import Base, TimestampMixin
+from app.database.base import Base, TimestampMixin, ShortIdMixin
 
 if TYPE_CHECKING:
     from app.models.portfolio import Portfolio
 
 
-class User(Base, TimestampMixin):
+class User(Base, TimestampMixin, ShortIdMixin):
     """
     User entity representing an investor, portfolio manager, or analyst.
     Can own multiple distinct investment portfolios.
     """
     __tablename__ = "users"
+    __short_id_prefix__ = "usr"
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),

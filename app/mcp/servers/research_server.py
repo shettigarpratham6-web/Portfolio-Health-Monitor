@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Research MCP Server
 Exposes Web Research, Corporate Announcement & Document Extraction Tools via MCP
 """

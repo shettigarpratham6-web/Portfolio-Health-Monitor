@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Portfolio Impact Agent
 Calculates deterministic impact scores and maps verified events to portfolio equity holdings.
 """
@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from app.agents.portfolio_agent import PortfolioContext
 from app.agents.verification_agent import VerifiedEvent
+from app.core.terminal_logger import TerminalLogger
 from app.mcp.clients import get_mcp_client
 from app.services.llm import get_llm_service
 
@@ -150,6 +151,11 @@ class ImpactAgent:
                     f"Direct exposure of {holding.weight_pct:.1f}% (${holding.market_value:,.2f}) "
                     f"to verified '{ev.event_type}' event with {ev.sentiment} sentiment. "
                     f"Weighted portfolio risk contribution: {weighted_risk:.2f}."
+                )
+
+                TerminalLogger.log_agent_step(
+                    f"↳ Direct Impact on {holding.ticker}: Score={score:+.1f}/10 ({direction}) | "
+                    f"Severity={severity_label} | Risk Contrib={weighted_risk:.2f}"
                 )
 
                 impacts.append(

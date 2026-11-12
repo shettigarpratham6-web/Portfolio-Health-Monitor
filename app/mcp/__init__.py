@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Model Context Protocol (MCP) Module Exports
 """
 

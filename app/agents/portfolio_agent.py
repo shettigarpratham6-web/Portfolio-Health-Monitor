@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Portfolio Intelligence Agent
 Retrieves holdings, calculates allocation and concentration metrics, and builds portfolio context.
 """

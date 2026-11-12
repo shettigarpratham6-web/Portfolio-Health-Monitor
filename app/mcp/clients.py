@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 MCP Client Gateway
 Connects to the three independent MCP servers and exposes tools to LangGraph & Agent Workflows
 """

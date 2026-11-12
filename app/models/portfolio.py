@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Portfolio Model
 """
 
@@ -9,7 +9,7 @@ import uuid
 from sqlalchemy import Boolean, ForeignKey, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database.base import Base, TimestampMixin
+from app.database.base import Base, TimestampMixin, ShortIdMixin
 
 if TYPE_CHECKING:
     from app.models.holding import Holding
@@ -17,12 +17,13 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 
-class Portfolio(Base, TimestampMixin):
+class Portfolio(Base, TimestampMixin, ShortIdMixin):
     """
     Portfolio entity owned by a user.
     Houses multiple stock holdings and monitors health, risks, and alerts.
     """
     __tablename__ = "portfolios"
+    __short_id_prefix__ = "port"
 
     __table_args__ = (
         UniqueConstraint("user_id", "name", name="uq_portfolios_user_id_name"),

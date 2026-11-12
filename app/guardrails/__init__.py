@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Guardrails Module
 Exports input and output safety validation, prompt injection defense, SSRF filtering,
 and non-advisory compliance enforcers.

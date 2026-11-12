@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Input Safety & Guardrails Validation
 Validates user monitoring requests, MCP tool arguments, external research content,
 and protects against prompt injections, SSRF, and SQL injection attempts.

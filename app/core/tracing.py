@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 LangSmith Tracing & Observability Integration
 Configures LangSmith environment variables, tracks LangGraph runs, agent chains,
 LLM calls, and MCP tools while masking sensitive information.

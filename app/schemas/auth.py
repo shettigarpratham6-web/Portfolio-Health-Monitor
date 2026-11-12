@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Pydantic Schemas for Authentication & User Identity
 """
 
@@ -72,6 +72,7 @@ class TokenResponse(BaseModel):
 class UserResponse(BaseModel):
     """Public user profile response."""
     id: uuid.UUID
+    short_id: Optional[str] = None
     email: str
     full_name: Optional[str] = None
     is_active: bool

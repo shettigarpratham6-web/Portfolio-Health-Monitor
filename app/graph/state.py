@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 LangGraph Shared State Definition
 Defines strongly typed execution state, reducers, phase transition models, and initial state factory.
 """

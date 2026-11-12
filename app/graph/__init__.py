@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Graph Module
 Exports LangGraph workflow orchestration layer, shared state definitions, and factories.
 """

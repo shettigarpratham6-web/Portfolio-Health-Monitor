@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 LangGraph Workflow Orchestration Layer
 Registers the six autonomous monitoring agents as graph nodes, implements Supervisor-controlled
 task routing, conditional edges, retry limits, loop protection, and checkpointer persistence.
@@ -7,6 +7,7 @@ task routing, conditional edges, retry limits, loop protection, and checkpointer
 
 from datetime import datetime, timezone
 import logging
+import time
 from typing import Any, Callable, Dict, List, Optional
 import uuid
 
@@ -14,6 +15,8 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+
+from app.core.terminal_logger import TerminalLogger
 
 from app.agents.discovery_agent import CompanyTarget, DiscoveryAgent, DiscoveryAgentInput, DiscoveryOutput
 from app.agents.impact_agent import ImpactAgent, ImpactAgentInput, PortfolioImpactReport
@@ -203,6 +206,9 @@ class AgentXWorkflow:
             has_errors = bool(state.get("errors"))
             final_status = WorkflowStatus.PARTIAL_SUCCESS.value if has_errors else WorkflowStatus.SUCCESS.value
             logger.info("Supervisor concluding run with status: %s", final_status)
+            TerminalLogger.log_agent_start("Supervisor Agent", "Final Quality & Non-Advisory Audit", icon="🤖")
+            TerminalLogger.log_agent_step(f"Verifying non-advisory legal disclaimers and run integrity: status={final_status}")
+            TerminalLogger.log_agent_finish("Supervisor Agent", 2.0, summary=f"Workflow quality audit concluded with status={final_status}.")
             updates.update({
                 "status": final_status,
                 "next_node": WorkflowNodeName.FINAL_RESULT.value,
@@ -217,6 +223,8 @@ class AgentXWorkflow:
 
         # 4. Initial workflow dispatch: create execution plan
         if state.get("execution_plan") is None:
+            start_t = time.perf_counter()
+            TerminalLogger.log_agent_start("Supervisor Agent", "Orchestrator & Graph Auditor", icon="🤖", phase_num=1)
             try:
                 req_type_str = state.get("request_type", "full_portfolio_check")
                 try:
@@ -237,6 +245,11 @@ class AgentXWorkflow:
                     )
                 )
                 logger.info("Supervisor generated execution plan '%s' for portfolio '%s'.", plan.plan_id, portfolio_id)
+                TerminalLogger.log_agent_step(f"Formulated execution plan '{plan.plan_id}' with {len(plan.phases)} phases")
+                target_str = ", ".join(plan.target_tickers) if plan.target_tickers else "All equity holdings in portfolio"
+                TerminalLogger.log_agent_step(f"Target scope: {target_str}")
+                dur_ms = (time.perf_counter() - start_t) * 1000
+                TerminalLogger.log_agent_finish("Supervisor Agent", dur_ms, summary=f"Execution plan '{plan.plan_id}' activated.")
                 updates.update({
                     "execution_plan": plan,
                     "status": WorkflowStatus.RUNNING.value,
@@ -275,6 +288,12 @@ class AgentXWorkflow:
         """
         portfolio_id = state["portfolio_id"]
         logger.info("Graph Node: portfolio_intelligence executing for portfolio: %s", portfolio_id)
+        start_t = time.perf_counter()
+        TerminalLogger.log_agent_start("Portfolio Intelligence Agent", "Holdings & Weight Analyst", icon="📊", phase_num=2)
+        TerminalLogger.log_tool_invocation("get_portfolio", "database", {"portfolio_id": portfolio_id})
+        TerminalLogger.log_tool_invocation("get_holdings", "database", {"portfolio_id": portfolio_id})
+        TerminalLogger.log_tool_invocation("calculate_portfolio_allocation", "analysis", {"portfolio_id": portfolio_id})
+        TerminalLogger.log_tool_invocation("analyze_company_relationships", "analysis", {"portfolio_id": portfolio_id})
 
         try:
             context: PortfolioContext = await self.portfolio_agent.run(
@@ -287,6 +306,27 @@ class AgentXWorkflow:
                 next_node = WorkflowNodeName.REPORTING.value
             else:
                 next_node = WorkflowNodeName.DISCOVERY.value
+
+            holdings_details = [
+                f"{h.ticker}: {h.shares:g} shares @ ${h.buy_price:.2f} | Mkt Val: ${h.market_value:,.2f} | Weight: {h.weight_pct:.1f}%"
+                for h in context.holdings
+            ]
+            TerminalLogger.log_tool_result(
+                "Holdings & Allocations",
+                f"Retrieved {len(context.holdings)} positions (Valuation: ${context.total_market_value:,.2f} {context.currency})",
+                details=holdings_details,
+            )
+            dur_ms = (time.perf_counter() - start_t) * 1000
+            TerminalLogger.log_agent_finish(
+                "Portfolio Intelligence Agent",
+                dur_ms,
+                summary=f"Computed portfolio structure: {len(context.holdings)} holdings, Concentration={context.concentration_risk_level}",
+                key_metrics={
+                    "Total Valuation": f"${context.total_market_value:,.2f}",
+                    "Dominant Sector": f"{context.dominant_sector} ({context.dominant_sector_pct:.1f}%)",
+                    "Concentration Risk": context.concentration_risk_level,
+                },
+            )
 
             return {
                 "current_node": WorkflowNodeName.PORTFOLIO_INTELLIGENCE.value,
@@ -382,6 +422,10 @@ class AgentXWorkflow:
             }
 
         logger.info("Graph Node: discovery searching for %d target equities.", len(targets))
+        start_t = time.perf_counter()
+        TerminalLogger.log_agent_start("News & Filing Discovery Agent", "Live Market & Regulatory Analyst", icon="🌐", phase_num=3)
+        target_labels = [f"{t.company_name} ({t.ticker})" for t in targets]
+        TerminalLogger.log_agent_step(f"Executing web and regulatory searches across {len(targets)} targets: {', '.join(target_labels)}")
         try:
             disc_out: DiscoveryOutput = await self.discovery_agent.run(
                 DiscoveryAgentInput(
@@ -391,6 +435,26 @@ class AgentXWorkflow:
                     include_filings=state.get("include_filings", True),
                     include_news=state.get("include_news", True),
                 )
+            )
+
+            discovered_details = [
+                f"[{ev.ticker}] {ev.title[:65]} ({ev.source_name})"
+                for ev in disc_out.discovered_events[:5]
+            ]
+            TerminalLogger.log_tool_result(
+                "Tavily Market Intelligence",
+                f"Retrieved {disc_out.total_discovered} items across {len(disc_out.companies_searched)} holdings",
+                details=discovered_details,
+            )
+            dur_ms = (time.perf_counter() - start_t) * 1000
+            TerminalLogger.log_agent_finish(
+                "News & Filing Discovery Agent",
+                dur_ms,
+                summary=f"Gathered {disc_out.total_discovered} candidate news items and regulatory filings.",
+                key_metrics={
+                    "Total Gathered": disc_out.total_discovered,
+                    "Companies Searched": len(disc_out.companies_searched),
+                },
             )
 
             return {
@@ -444,8 +508,13 @@ class AgentXWorkflow:
         """
         discovered_events = state.get("discovered_events", [])
         logger.info("Graph Node: verification evaluating %d candidate events.", len(discovered_events))
+        start_t = time.perf_counter()
+        TerminalLogger.log_agent_start("Research & Verification Agent", "Noise Filter & Fact Corroborator", icon="🛡️", phase_num=4)
+        TerminalLogger.log_agent_step(f"Evaluating {len(discovered_events)} candidate documents via SHA-256 deduplication and OpenRouter LLM...")
 
         if not discovered_events:
+            dur_ms = (time.perf_counter() - start_t) * 1000
+            TerminalLogger.log_agent_finish("Research & Verification Agent", dur_ms, summary="0 candidate events to evaluate.")
             return {
                 "current_node": WorkflowNodeName.VERIFICATION.value,
                 "verified_events": [],
@@ -463,6 +532,26 @@ class AgentXWorkflow:
         try:
             ver_out: VerificationOutput = await self.verification_agent.run(
                 VerificationAgentInput(discovered_events=discovered_events)
+            )
+
+            sample_verified = [
+                f"[{v.ticker}] {v.canonical_title[:55]} (Credibility: {v.credibility_score*100:.0f}%, Sentiment: {v.sentiment})"
+                for v in ver_out.verified_events[:5]
+            ]
+            TerminalLogger.log_tool_result(
+                "Fact Verification & Provenance",
+                f"Verified {ver_out.total_verified} events ({ver_out.duplicates_filtered} duplicates filtered)",
+                details=sample_verified,
+            )
+            dur_ms = (time.perf_counter() - start_t) * 1000
+            TerminalLogger.log_agent_finish(
+                "Research & Verification Agent",
+                dur_ms,
+                summary=f"Verified {ver_out.total_verified} events, removed {ver_out.duplicates_filtered} duplicates from {ver_out.total_reviewed} candidate documents.",
+                key_metrics={
+                    "Verified Events": ver_out.total_verified,
+                    "Duplicates Filtered": ver_out.duplicates_filtered,
+                },
             )
 
             return {
@@ -518,10 +607,16 @@ class AgentXWorkflow:
         portfolio_context = state.get("portfolio_context")
         verified_events = state.get("verified_events", [])
         logger.info("Graph Node: impact assessing %d verified events.", len(verified_events))
+        start_t = time.perf_counter()
+        TerminalLogger.log_agent_start("Portfolio Impact Agent", "Deterministic Risk Quantifier", icon="⚠️", phase_num=5)
+        TerminalLogger.log_agent_step(f"Calculating mathematical exposure for {len(verified_events)} verified events against portfolio holdings...")
 
         if not portfolio_context:
             err_msg = "Portfolio Impact node missing required portfolio context."
             logger.error(err_msg)
+            dur_ms = (time.perf_counter() - start_t) * 1000
+            TerminalLogger.log_agent_error("Portfolio Impact Agent", err_msg)
+            TerminalLogger.log_agent_finish("Portfolio Impact Agent", dur_ms, status="FAILED")
             return {
                 "current_node": WorkflowNodeName.IMPACT.value,
                 "next_node": WorkflowNodeName.REPORTING.value,
@@ -534,6 +629,27 @@ class AgentXWorkflow:
                     portfolio_context=portfolio_context,
                     verified_events=verified_events,
                 )
+            )
+
+            sample_impacts = [
+                f"[{imp.ticker}] {imp.event_title[:45]} | Impact: {imp.impact_score:+.1f} ({imp.impact_severity}) | Weighted Risk: {imp.weighted_portfolio_risk:.2f}"
+                for imp in impact_rep.holding_impacts[:5]
+            ]
+            TerminalLogger.log_tool_result(
+                "Deterministic Risk Matrix",
+                f"Evaluated {impact_rep.total_events_evaluated} events: {impact_rep.direct_impacts_count} direct impacts, {impact_rep.indirect_impacts_count} indirect",
+                details=sample_impacts,
+            )
+            dur_ms = (time.perf_counter() - start_t) * 1000
+            TerminalLogger.log_agent_finish(
+                "Portfolio Impact Agent",
+                dur_ms,
+                summary=f"Aggregate portfolio risk assessed at {impact_rep.aggregate_risk_level}. Most affected: {impact_rep.highest_impact_holding or 'None'}.",
+                key_metrics={
+                    "Aggregate Risk": impact_rep.aggregate_risk_level,
+                    "Direct Impacts": impact_rep.direct_impacts_count,
+                    "Indirect Impacts": impact_rep.indirect_impacts_count,
+                },
             )
 
             return {
@@ -605,9 +721,16 @@ class AgentXWorkflow:
         portfolio_context = state.get("portfolio_context")
 
         logger.info("Graph Node: reporting synthesizing monitoring report for portfolio: %s", portfolio_id)
+        start_t = time.perf_counter()
+        TerminalLogger.log_agent_start("Alert & Reporting Agent", "Alert Writer & Persistence Guard", icon="📑", phase_num=6)
+        TerminalLogger.log_tool_invocation("save_research_event", "database", {"verified_events_count": len(verified_events)})
+        TerminalLogger.log_tool_invocation("save_evidence_source", "database", {"citations_to_persist": len(verified_events)})
+        TerminalLogger.log_tool_invocation("save_monitoring_alert", "database", {"portfolio_id": portfolio_id})
 
         # Handle empty portfolio scenario (no impact report needed)
         if not impact_report and portfolio_context and not portfolio_context.holdings:
+            dur_ms = (time.perf_counter() - start_t) * 1000
+            TerminalLogger.log_agent_finish("Alert & Reporting Agent", dur_ms, summary="Empty portfolio report generated.")
             empty_report = MonitoringReport(
                 portfolio_id=portfolio_id,
                 executive_summary="Portfolio contains no active holdings. No risk alerts or events recorded.",
@@ -646,6 +769,27 @@ class AgentXWorkflow:
                     verified_events=verified_events,
                     persist_to_database=state.get("persist_alerts", True),
                 )
+            )
+
+            sample_alerts = [
+                f"[{a.severity}] {a.title[:55]} ({len(a.evidence_sources)} sources)"
+                for a in m_report.alerts[:4]
+            ]
+            TerminalLogger.log_tool_result(
+                "Database Persistence & Report Generation",
+                f"Generated {len(m_report.alerts)} alerts ({m_report.persisted_alerts_count} saved to PostgreSQL)",
+                details=sample_alerts,
+            )
+            dur_ms = (time.perf_counter() - start_t) * 1000
+            TerminalLogger.log_agent_finish(
+                "Alert & Reporting Agent",
+                dur_ms,
+                summary=f"Synthesized {len(m_report.alerts)} alerts ({m_report.persisted_alerts_count} persisted to DB, {m_report.persisted_events_count} research events saved).",
+                key_metrics={
+                    "Alerts Formulated": len(m_report.alerts),
+                    "Persisted to DB": m_report.persisted_alerts_count,
+                    "Events Saved": m_report.persisted_events_count,
+                },
             )
 
             return {

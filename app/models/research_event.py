@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Research Event Model
 """
 
@@ -20,7 +20,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database.base import Base, TimestampMixin
+from app.database.base import Base, TimestampMixin, ShortIdMixin
 
 if TYPE_CHECKING:
     from app.models.company import Company
@@ -65,12 +65,13 @@ class VerificationStatus(str, Enum):
     INCONCLUSIVE = "INCONCLUSIVE"
 
 
-class ResearchEvent(Base, TimestampMixin):
+class ResearchEvent(Base, TimestampMixin, ShortIdMixin):
     """
     Evidence-based financial research event discovered by intelligence agents.
     Deduplicated via unique event_hash to guarantee idempotency.
     """
     __tablename__ = "research_events"
+    __short_id_prefix__ = "ev"
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),

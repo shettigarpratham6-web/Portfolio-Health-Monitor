@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Analysis MCP Server
 Exposes Financial Analytics, Portfolio Allocation, Exposure & Event Deduplication Tools via MCP
 """

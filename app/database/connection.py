@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Asynchronous PostgreSQL Database Connection & Session Management
 """
 

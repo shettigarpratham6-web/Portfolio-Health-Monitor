@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 SQLAlchemy Declarative Domain Models
 """
 

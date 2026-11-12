@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Holding Model
 """
 
@@ -10,19 +10,20 @@ import uuid
 from sqlalchemy import CheckConstraint, ForeignKey, Numeric, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database.base import Base, TimestampMixin
+from app.database.base import Base, TimestampMixin, ShortIdMixin
 
 if TYPE_CHECKING:
     from app.models.company import Company
     from app.models.portfolio import Portfolio
 
 
-class Holding(Base, TimestampMixin):
+class Holding(Base, TimestampMixin, ShortIdMixin):
     """
     Position in a portfolio referencing a company asset.
     Contains position size, purchase metrics, and real-time valuation metrics.
     """
     __tablename__ = "holdings"
+    __short_id_prefix__ = "hold"
 
     __table_args__ = (
         UniqueConstraint("portfolio_id", "company_id", name="uq_holdings_portfolio_company"),

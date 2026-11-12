@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Core Application Configuration & Settings Management
 """
 
@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     # Application & Runtime
     # --------------------------------------------------------------------------
     PROJECT_NAME: str = Field(
-        default="AgentX – Portfolio Health Monitor",
+        default="Portfolio Health Monitor",
         description="Human-readable project title",
     )
     VERSION: str = Field(

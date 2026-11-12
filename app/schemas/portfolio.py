@@ -1,11 +1,11 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Pydantic v2 Schemas for Portfolio API
 """
 
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 import uuid
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -89,9 +89,30 @@ class PortfolioUpdate(BaseModel):
         return None
 
 
+class HoldingCreate(BaseModel):
+    """Payload to add a new asset holding position to a portfolio."""
+    ticker: str = Field(..., min_length=1, max_length=10, description="Asset ticker symbol, e.g. NVDA, AAPL")
+    company_name: Optional[str] = Field(default=None, max_length=255, description="Full legal corporate name")
+    shares: Decimal = Field(..., gt=0, description="Quantity of shares owned (must be > 0)")
+    average_buy_price: Decimal = Field(..., gt=0, description="Average cost basis per share (must be > 0)")
+    current_price: Optional[Decimal] = Field(default=None, gt=0, description="Latest market price per share")
+    notes: Optional[str] = Field(default=None, max_length=500, description="Position thesis or notes")
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("ticker")
+    @classmethod
+    def clean_ticker(cls, v: str) -> str:
+        trimmed = v.strip().upper()
+        if not trimmed:
+            raise ValueError("Ticker cannot be empty.")
+        return trimmed
+
+
 class HoldingSummary(BaseModel):
     """Summary of a single holding within a portfolio."""
     id: uuid.UUID
+    short_id: Optional[str] = None
     company_id: uuid.UUID
     ticker: Optional[str] = None
     company_name: Optional[str] = None
@@ -107,6 +128,7 @@ class HoldingSummary(BaseModel):
 class PortfolioResponse(PortfolioBase):
     """Summary representation of a portfolio returned in listings and creations."""
     id: uuid.UUID
+    short_id: Optional[str] = None
     user_id: uuid.UUID
     is_active: bool
     created_at: datetime
@@ -155,18 +177,96 @@ class MonitoringTriggerRequest(BaseModel):
     persist_alerts: bool = True
 
 
+class AlertStatusUpdate(BaseModel):
+    """Payload to update an alert's lifecycle status."""
+    status: str = Field(..., description="Target status: ACKNOWLEDGED, RESOLVED, or ACTIVE")
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        upper = v.strip().upper()
+        if upper not in ("ACTIVE", "ACKNOWLEDGED", "RESOLVED"):
+            raise ValueError("Status must be one of: ACTIVE, ACKNOWLEDGED, RESOLVED")
+        return upper
+
+
 class MonitoringAlertResponse(BaseModel):
     """Schema for persisted monitoring alert records."""
     id: uuid.UUID
+    short_id: Optional[str] = None
     portfolio_id: uuid.UUID
     title: str
     message: str
     alert_type: str
     severity: str
     status: str
+    acknowledged_at: Optional[datetime] = None
+    resolved_at: Optional[datetime] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DiscoveredEventItem(BaseModel):
+    """Structured record of an event or filing discovered from research."""
+    company_name: Optional[str] = None
+    ticker: Optional[str] = None
+    company_id: Optional[str] = None
+    title: str
+    url: Optional[str] = None
+    source_name: Optional[str] = None
+    publication_date: Optional[str] = None
+    snippet: Optional[str] = None
+    event_category: Optional[str] = None
+    relevance_score: Optional[float] = None
+
+
+class VerifiedEventItem(BaseModel):
+    """Corroborated and verified event with primary citations and fact separation."""
+    company_name: Optional[str] = None
+    ticker: Optional[str] = None
+    company_id: Optional[str] = None
+    canonical_title: str
+    verified_summary: str
+    event_type: Optional[str] = None
+    sentiment: Optional[str] = None
+    verification_status: Optional[str] = None
+    credibility_score: Optional[float] = None
+    primary_source_url: Optional[str] = None
+    source_name: Optional[str] = None
+    published_date: Optional[str] = None
+    facts: List[Any] = Field(default_factory=list)
+    speculative_claims: List[Any] = Field(default_factory=list)
+
+
+class HoldingImpactItem(BaseModel):
+    """Deterministic holding exposure and risk evaluation."""
+    ticker: str
+    company_name: str
+    holding_weight_pct: Optional[float] = None
+    holding_market_value: Optional[float] = None
+    direct_exposure: bool = True
+    indirect_exposure_reason: Optional[str] = None
+    event_title: str
+    event_type: str
+    impact_direction: str
+    impact_severity: str
+    impact_score: Optional[float] = None
+    weighted_portfolio_risk: Optional[float] = None
+    deterministic_rationale: Optional[str] = None
+
+
+class StructuredAlertSummaryItem(BaseModel):
+    """Structured alert record detailing an event impact."""
+    alert_id: Optional[str] = None
+    ticker: Optional[str] = None
+    title: str
+    alert_type: str
+    severity: str
+    message: str
+    affected_holdings: List[str] = Field(default_factory=list)
+    evidence_sources: List[str] = Field(default_factory=list)
+    confidence: float = 1.0
 
 
 class MonitoringRunResponse(BaseModel):
@@ -179,6 +279,38 @@ class MonitoringRunResponse(BaseModel):
     alerts_generated_count: int = 0
     persisted_alerts_count: int = 0
     errors: List[str] = Field(default_factory=list)
+    non_advisory_notice: str
+    discovery_summary: Optional[str] = None
+    verification_summary: Optional[str] = None
+    impact_summary: Optional[str] = None
+    discovered_events: List[DiscoveredEventItem] = Field(default_factory=list)
+    verified_events: List[VerifiedEventItem] = Field(default_factory=list)
+    holding_impacts: List[HoldingImpactItem] = Field(default_factory=list)
+    alerts: List[StructuredAlertSummaryItem] = Field(default_factory=list)
+
+
+class PortfolioChatRequest(BaseModel):
+    """Payload to ask an interactive natural language question about a portfolio."""
+    query: str = Field(..., min_length=1, max_length=1000, description="Natural language investor query")
+    history: Optional[List[Dict[str, str]]] = Field(default=None, description="Optional prior conversation turns")
+
+    @field_validator("query")
+    @classmethod
+    def clean_query(cls, v: str) -> str:
+        trimmed = v.strip()
+        if not trimmed:
+            raise ValueError("Query cannot be empty.")
+        return trimmed
+
+
+class PortfolioChatResponse(BaseModel):
+    """Response from the Portfolio Health Monitor AI Copilot."""
+    portfolio_id: str
+    portfolio_name: str
+    query: str
+    answer: str
+    cited_holdings: List[str] = Field(default_factory=list)
+    confidence: str = "HIGH"
     non_advisory_notice: str
 
 

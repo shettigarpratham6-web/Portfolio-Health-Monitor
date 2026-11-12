@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Company Model
 """
 
@@ -9,7 +9,7 @@ import uuid
 from sqlalchemy import Boolean, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database.base import Base, TimestampMixin
+from app.database.base import Base, TimestampMixin, ShortIdMixin
 
 if TYPE_CHECKING:
     from app.models.holding import Holding
@@ -17,12 +17,13 @@ if TYPE_CHECKING:
     from app.models.research_event import ResearchEvent
 
 
-class Company(Base, TimestampMixin):
+class Company(Base, TimestampMixin, ShortIdMixin):
     """
     Company entity representing a publicly traded asset or equity.
     Tracked across portfolios and monitored by intelligence agents.
     """
     __tablename__ = "companies"
+    __short_id_prefix__ = "comp"
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),

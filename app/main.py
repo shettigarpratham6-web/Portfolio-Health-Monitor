@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Application Entry Point & FastAPI Route Assembly
 """
 
@@ -25,7 +25,7 @@ logger = setup_logging(settings)
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan context managing startup validation and shutdown resource cleanup."""
     logger.info(
-        "AgentX application booting | project=%s | env=%s | version=%s",
+        "Portfolio Health Monitor application booting | project=%s | env=%s | version=%s",
         settings.PROJECT_NAME,
         settings.ENVIRONMENT.value,
         settings.VERSION,
@@ -54,7 +54,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Gracefully dispose database connection pools on shutdown
     logger.info("Application shutdown initiated. Disposing resources...")
     await close_db_connection()
-    logger.info("AgentX application shutdown completed.")
+    logger.info("Portfolio Health Monitor application shutdown completed.")
 
 
 app = FastAPI(

@@ -1,5 +1,5 @@
 """
-AgentX – Authentication API Integration Tests
+Portfolio Health Monitor – Authentication API Integration Tests
 Tests for:
 1. User Registration (valid, duplicate, validation failures)
 2. OAuth2 Password Form Login (POST /api/v1/auth/token)

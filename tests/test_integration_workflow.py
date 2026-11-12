@@ -1,5 +1,5 @@
 """
-AgentX – Complete Integration Workflow Tests
+Portfolio Health Monitor – Complete Integration Workflow Tests
 Tests the full autonomous monitoring lifecycle for a hypothetical portfolio:
 Holdings:
   - Apple Inc. (AAPL)

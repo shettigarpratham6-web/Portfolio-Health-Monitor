@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Alert & Reporting Agent
 Generates structured alerts with primary citations and persists reports via Database MCP tools.
 """
@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from app.agents.impact_agent import PortfolioImpactReport
 from app.agents.verification_agent import VerifiedEvent
+from app.core.terminal_logger import TerminalLogger
 from app.mcp.clients import get_mcp_client
 from app.services.llm import get_llm_service
 
@@ -120,6 +121,7 @@ class ReportingAgent:
                     if ev_db_id:
                         event_db_ids[ev.event_hash] = ev_db_id
                         persisted_events += 1
+                        TerminalLogger.log_agent_step(f"↳ Saved event to PostgreSQL [{ev.ticker}]: \"{ev.canonical_title[:55]}\"")
 
                         # Also persist primary source citation
                         if ev.primary_source_url:
@@ -135,6 +137,7 @@ class ReportingAgent:
                                 },
                                 server_name="database",
                             )
+                            TerminalLogger.log_agent_step(f"  ↳ Citation: {ev.source_name} ({ev.primary_source_url[:45]}...)")
                 except Exception as exc:
                     logger.warning("Failed to persist event '%s': %s", ev.canonical_title, exc)
 
@@ -183,6 +186,7 @@ class ReportingAgent:
                             alert_id = res_alert.get("alert_id")
                             persisted_status = True
                             persisted_alerts += 1
+                            TerminalLogger.log_agent_step(f"↳ Persisted [{imp.impact_severity}] Alert on {imp.ticker}: \"{alert_title[:55]}\"")
                     except Exception as exc:
                         logger.warning("Failed to persist alert for %s: %s", imp.ticker, exc)
 

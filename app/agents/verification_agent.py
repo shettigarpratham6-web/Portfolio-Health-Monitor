@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 Research & Verification Agent
 Verifies credibility, dates, separates factual evidence from market rumors, and filters duplicates.
 """
@@ -12,6 +12,7 @@ from langsmith import traceable
 from pydantic import BaseModel, Field
 
 from app.agents.discovery_agent import DiscoveredEvent
+from app.core.terminal_logger import TerminalLogger
 from app.mcp.clients import get_mcp_client
 from app.services.llm import get_llm_service
 
@@ -122,6 +123,7 @@ class VerificationAgent:
 
             if dup_res.get("is_duplicate") or canonical_hash in seen_hashes:
                 logger.info("Filtered duplicate event: '%s' (%s)", ev.title, ev.ticker)
+                TerminalLogger.log_agent_step(f"↳ [{ev.ticker}] Filtered duplicate event: \"{ev.title[:55]}\"")
                 duplicates_count += 1
                 continue
 
@@ -145,6 +147,8 @@ class VerificationAgent:
                 f"Extract facts, isolate speculation, and classify verification status."
             )
 
+            TerminalLogger.log_api_call("OpenRouter LLM", f"Verification for [{ev.ticker}] \"{ev.title[:50]}\"", endpoint_or_model="generate_structured")
+
             try:
                 analysis: LLMVerificationSchema = await self.llm.generate_structured(
                     messages=[
@@ -157,12 +161,20 @@ class VerificationAgent:
 
                 if analysis.credibility_score < input_data.min_credibility_threshold:
                     logger.info("Skipping low-credibility event (score=%.2f): '%s'", analysis.credibility_score, ev.title)
+                    TerminalLogger.log_agent_step(f"↳ [{ev.ticker}] Skipped low credibility ({analysis.credibility_score:.2f} < {input_data.min_credibility_threshold}): \"{ev.title[:50]}\"", level="warn")
                     continue
 
                 facts_list = [
                     VerifiedFact(statement=f_str, is_corroborated=True, confidence=analysis.credibility_score)
                     for f_str in analysis.facts
                 ]
+
+                TerminalLogger.log_agent_step(
+                    f"↳ [{ev.ticker}] Verified: Sentiment={analysis.sentiment} | "
+                    f"Credibility={analysis.credibility_score*100:.0f}% | "
+                    f"Status={analysis.verification_status} | "
+                    f"Facts={len(facts_list)} | Speculative={len(analysis.speculative_claims)}"
+                )
 
                 verified_event = VerifiedEvent(
                     company_name=ev.company_name,

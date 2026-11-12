@@ -1,5 +1,5 @@
 """
-AgentX – Portfolio Health Monitor
+Portfolio Health Monitor
 News & Filing Discovery Agent
 Discovers market events, filings, and regulatory disclosures using Research MCP tools.
 """
@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 from langsmith import traceable
 from pydantic import BaseModel, Field
 
+from app.core.terminal_logger import TerminalLogger
 from app.mcp.clients import get_mcp_client
 from app.services.llm import get_llm_service
 
@@ -90,9 +91,12 @@ class DiscoveryAgent:
             c_name = target.company_name
             ticker = target.ticker.upper()
             companies_searched.append(f"{c_name} ({ticker})")
+            TerminalLogger.log_agent_step(f"Researching equity target: {c_name} ({ticker})")
 
             # 1. Search news via Research MCP
             if input_data.include_news:
+                news_query = f"{c_name} ({ticker}) financial news earnings revenue analysis"
+                TerminalLogger.log_api_call("Tavily Search API", news_query, endpoint_or_model="topic=news")
                 try:
                     news_res = await self.mcp.call_tool(
                         tool_name="search_company_news",
@@ -104,6 +108,8 @@ class DiscoveryAgent:
                         server_name="research",
                     )
                     articles = news_res.get("articles", []) if news_res.get("status") == "success" else []
+                    if articles:
+                        TerminalLogger.log_agent_step(f"↳ [{ticker}] Discovered {len(articles)} news items from {', '.join(set(a.get('source_name', 'news') for a in articles[:3]))}")
                     for art in articles:
                         all_events.append(
                             DiscoveredEvent(
@@ -121,9 +127,12 @@ class DiscoveryAgent:
                         )
                 except Exception as exc:
                     logger.warning("News discovery failed for %s (%s): %s", c_name, ticker, exc)
+                    TerminalLogger.log_agent_step(f"↳ [{ticker}] News search warning: {exc}", level="warn")
 
             # 2. Search corporate filings & press releases via Research MCP
             if input_data.include_filings:
+                filing_query = f"{c_name} {ticker} official press release SEC filing 8-K 10-Q corporate announcement"
+                TerminalLogger.log_api_call("Tavily Search API", filing_query, endpoint_or_model="depth=advanced")
                 try:
                     filings_res = await self.mcp.call_tool(
                         tool_name="search_company_filings",
@@ -135,6 +144,8 @@ class DiscoveryAgent:
                         server_name="research",
                     )
                     filings = filings_res.get("filings", []) if filings_res.get("status") == "success" else []
+                    if filings:
+                        TerminalLogger.log_agent_step(f"↳ [{ticker}] Discovered {len(filings)} corporate disclosures/filings")
                     for f in filings:
                         all_events.append(
                             DiscoveredEvent(
@@ -152,6 +163,7 @@ class DiscoveryAgent:
                         )
                 except Exception as exc:
                     logger.warning("Filing discovery failed for %s (%s): %s", c_name, ticker, exc)
+                    TerminalLogger.log_agent_step(f"↳ [{ticker}] Filing search warning: {exc}", level="warn")
 
         summary = (
             f"Discovery agent retrieved {len(all_events)} items across "
