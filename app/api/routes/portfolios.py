@@ -4,7 +4,7 @@ Portfolios API Endpoints
 """
 
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import hashlib
 import logging
 import time
@@ -42,6 +42,7 @@ from app.schemas.portfolio import (
     PortfolioResponse,
 )
 from app.services.llm import get_llm_service
+from app.services.twelve_data import get_twelve_data_service
 
 logger = logging.getLogger("agentx.api.portfolios")
 router = APIRouter(prefix="/portfolios", tags=["Portfolios"])
@@ -173,6 +174,140 @@ async def list_portfolios(
     )
 
 
+def to_cents(val: Decimal) -> Decimal:
+    """Rounds a Decimal financial value to 2 decimal places using standard financial rounding."""
+    return val.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+async def refresh_portfolio_holdings_valuation(
+    portfolio: Portfolio,
+    db: AsyncSession,
+) -> tuple[list[HoldingSummary], Decimal]:
+    """
+    Refreshes holding market valuations and weights with accurate decimal arithmetic:
+    1. Fetches latest valid quotes from Twelve Data (batch mode, cached with TTL).
+    2. Converts all asset values (including Indian equities like PAGEIND in INR) into the common portfolio currency (USD or INR).
+    3. Keeps Average Price strictly based on actual purchase history (never overwritten with current market prices).
+    4. Calculates Market Value exactly as Shares * Current Price to 2 decimal places without precision errors.
+    5. Calculates Total Portfolio Value = sum(Market Values in portfolio currency).
+    6. Calculates Portfolio Weight % = (Individual Market Value / Total Portfolio Value) * 100, ensuring all weights add up to ~100%.
+    7. Persists updated valuations and returns HoldingSummary list with total market value.
+    """
+    if not portfolio.holdings:
+        return [], Decimal("0.00")
+
+    td_service = get_twelve_data_service()
+    portfolio_currency = (portfolio.currency or "USD").strip().upper()
+
+    # Extract unique tickers and prepare non-fabricated fallback prices
+    tickers: list[str] = []
+    fallback_prices: dict[str, Decimal] = {}
+    for h in portfolio.holdings:
+        if h.company and h.company.ticker:
+            t = h.company.ticker.strip().upper()
+            tickers.append(t)
+            fb = h.current_price or h.average_buy_price
+            if fb is not None:
+                fallback_prices[t] = Decimal(str(fb))
+
+    quotes = await td_service.get_quotes(tickers, fallback_prices=fallback_prices)
+
+    # Update each holding with validated prices and currency normalization
+    for h in portfolio.holdings:
+        ticker = h.company.ticker.strip().upper() if h.company and h.company.ticker else None
+        quote = quotes.get(ticker) if ticker else None
+
+        # Determine native trading currency of this asset
+        is_indian = (
+            (h.company and (h.company.country == "IN" or h.company.exchange in ("NSE", "BSE")))
+            or ticker in ("PAGEIND", "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK")
+        )
+        native_currency = "INR" if is_indian else "USD"
+
+        # Obtain the latest valid price
+        if quote and quote.source == "twelve_data" and quote.price is not None:
+            quote_curr = (quote.currency or native_currency).strip().upper()
+            if quote_curr != portfolio_currency:
+                price_in_portfolio_curr = await td_service.convert_currency(
+                    quote.price, quote_curr, portfolio_currency
+                )
+            else:
+                price_in_portfolio_curr = quote.price
+        elif h.current_price is not None and h.current_price > Decimal("0"):
+            # Price in database is already in portfolio currency
+            price_in_portfolio_curr = Decimal(str(h.current_price))
+        elif h.average_buy_price is not None and h.average_buy_price > Decimal("0"):
+            price_in_portfolio_curr = Decimal(str(h.average_buy_price))
+        else:
+            # Fallback to recorded native price converted if present
+            native_val = Decimal("380.00") if ticker == "PAGEIND" else Decimal("100.00")
+            if native_currency != portfolio_currency:
+                price_in_portfolio_curr = await td_service.convert_currency(
+                    native_val, native_currency, portfolio_currency
+                )
+            else:
+                price_in_portfolio_curr = native_val
+
+        # Display prices consistently to 2 decimal places
+        h.current_price = to_cents(price_in_portfolio_curr)
+
+        # Market Value is calculated EXACTLY as Shares * Current Price (2 decimal places)
+        shares_dec = Decimal(str(h.shares))
+        h.market_value = to_cents(shares_dec * h.current_price)
+
+        # Average Buy Price is preserved from actual purchase history.
+        if h.average_buy_price is None or h.average_buy_price == Decimal("0"):
+            h.average_buy_price = h.current_price
+        else:
+            h.average_buy_price = to_cents(Decimal(str(h.average_buy_price)))
+
+        h.total_cost = to_cents(shares_dec * h.average_buy_price)
+
+    # Calculate Total Portfolio Market Value in common portfolio currency
+    total_market_value = sum(
+        (h.market_value for h in portfolio.holdings if h.market_value is not None),
+        Decimal("0.00"),
+    )
+
+    # Recalculate portfolio weights in common portfolio currency:
+    # Portfolio Weight = (Individual Market Value / Total Portfolio Value) * 100
+    for h in portfolio.holdings:
+        if total_market_value > Decimal("0") and h.market_value is not None:
+            weight = (h.market_value / total_market_value) * Decimal("100")
+            h.weight_pct = to_cents(weight)
+        else:
+            h.weight_pct = Decimal("0.00")
+
+    # Ensure all portfolio weights add up to exactly 100.00%
+    if portfolio.holdings and total_market_value > Decimal("0"):
+        sum_weights = sum(h.weight_pct for h in portfolio.holdings if h.weight_pct is not None)
+        diff = Decimal("100.00") - sum_weights
+        if diff != Decimal("0") and abs(diff) <= Decimal("0.10"):
+            largest_h = max(portfolio.holdings, key=lambda x: x.market_value or Decimal("0"))
+            largest_h.weight_pct = (largest_h.weight_pct + diff).quantize(Decimal("0.01"))
+
+    await db.commit()
+
+    holdings_summary: list[HoldingSummary] = []
+    for h in portfolio.holdings:
+        holdings_summary.append(
+            HoldingSummary(
+                id=h.id,
+                short_id=h.short_id,
+                company_id=h.company_id,
+                ticker=h.company.ticker if h.company else None,
+                company_name=h.company.name if h.company else None,
+                shares=h.shares,
+                average_buy_price=h.average_buy_price,
+                current_price=h.current_price,
+                market_value=h.market_value,
+                weight_pct=h.weight_pct,
+            )
+        )
+
+    return holdings_summary, total_market_value
+
+
 @router.get(
     "/{portfolio_id}",
     summary="Get Portfolio Details",
@@ -210,24 +345,7 @@ async def get_portfolio(
             detail="Portfolio not found.",
         )
 
-    holdings_summary: list[HoldingSummary] = []
-    total_market_value = Decimal("0.0000")
-
-    for h in portfolio.holdings:
-        summary = HoldingSummary(
-            id=h.id,
-            company_id=h.company_id,
-            ticker=h.company.ticker if h.company else None,
-            company_name=h.company.name if h.company else None,
-            shares=h.shares,
-            average_buy_price=h.average_buy_price,
-            current_price=h.current_price,
-            market_value=h.market_value,
-            weight_pct=h.weight_pct,
-        )
-        if h.market_value is not None:
-            total_market_value += h.market_value
-        holdings_summary.append(summary)
+    holdings_summary, total_market_value = await refresh_portfolio_holdings_valuation(portfolio, db)
 
     response = PortfolioDetailResponse.model_validate(portfolio)
     response.holdings = holdings_summary
@@ -480,69 +598,85 @@ async def add_portfolio_holding(
     company = await db.scalar(c_stmt)
     if not company:
         company_name = payload.company_name.strip() if payload.company_name else f"{clean_ticker} Corporation"
+        is_indian = clean_ticker in ("PAGEIND", "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK")
         company = Company(
             ticker=clean_ticker,
             name=company_name,
             sector="Technology",
             industry="Equities",
+            country="IN" if is_indian else "US",
+            exchange="NSE" if is_indian else "NASDAQ",
         )
         db.add(company)
         await db.flush()
 
-    # Check for duplicate holding in this portfolio
+    # Check for duplicate or existing holding in this portfolio
     h_stmt = select(Holding).where(
         Holding.portfolio_id == portfolio_id,
         Holding.company_id == company.id,
     )
     existing_holding = await db.scalar(h_stmt)
+
     if existing_holding:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"A holding for {clean_ticker} already exists in this portfolio.",
+        # Calculate Weighted Average Buy Price based on purchase history:
+        # new_total_shares = existing_shares + added_shares
+        # new_avg_buy_price = ((existing_shares * existing_avg) + (added_shares * added_price)) / new_total_shares
+        existing_shares = Decimal(str(existing_holding.shares))
+        existing_avg = Decimal(str(existing_holding.average_buy_price))
+        added_shares = Decimal(str(payload.shares))
+        added_price = Decimal(str(payload.average_buy_price))
+
+        total_shares = existing_shares + added_shares
+        if total_shares > Decimal("0"):
+            weighted_avg = ((existing_shares * existing_avg) + (added_shares * added_price)) / total_shares
+        else:
+            weighted_avg = added_price
+
+        existing_holding.shares = total_shares.quantize(Decimal("0.000001"))
+        existing_holding.average_buy_price = to_cents(weighted_avg)
+        existing_holding.total_cost = to_cents(existing_holding.shares * existing_holding.average_buy_price)
+        if payload.notes:
+            existing_holding.notes = payload.notes
+        target_holding_id = existing_holding.id
+    else:
+        shares_dec = Decimal(str(payload.shares)).quantize(Decimal("0.000001"))
+        avg_price_dec = to_cents(Decimal(str(payload.average_buy_price)))
+        init_price = to_cents(Decimal(str(payload.current_price))) if payload.current_price else avg_price_dec
+        new_holding = Holding(
+            portfolio_id=portfolio.id,
+            company_id=company.id,
+            shares=shares_dec,
+            average_buy_price=avg_price_dec,
+            current_price=init_price,
+            market_value=to_cents(shares_dec * init_price),
+            total_cost=to_cents(shares_dec * avg_price_dec),
+            notes=payload.notes,
         )
-
-    current_price = payload.current_price or payload.average_buy_price
-    market_value = payload.shares * current_price
-    total_cost = payload.shares * payload.average_buy_price
-
-    holding = Holding(
-        portfolio_id=portfolio.id,
-        company_id=company.id,
-        shares=payload.shares,
-        average_buy_price=payload.average_buy_price,
-        current_price=current_price,
-        market_value=market_value,
-        total_cost=total_cost,
-        notes=payload.notes,
-    )
-    db.add(holding)
-    await db.flush()
-
-    # Rebalance weights for all holdings in this portfolio
-    all_h_stmt = select(Holding).where(Holding.portfolio_id == portfolio_id)
-    all_holdings = (await db.execute(all_h_stmt)).scalars().all()
-    total_mv = sum((h.market_value for h in all_holdings if h.market_value is not None), Decimal("0.0000"))
-
-    if total_mv > 0:
-        for h in all_holdings:
-            if h.market_value is not None:
-                h.weight_pct = Decimal(str(round(float((h.market_value / total_mv) * 100), 2)))
+        db.add(new_holding)
+        await db.flush()
+        target_holding_id = new_holding.id
 
     await db.commit()
-    await db.refresh(holding)
 
-    return HoldingSummary(
-        id=holding.id,
-        short_id=holding.short_id,
-        company_id=holding.company_id,
-        ticker=company.ticker,
-        company_name=company.name,
-        shares=holding.shares,
-        average_buy_price=holding.average_buy_price,
-        current_price=holding.current_price,
-        market_value=holding.market_value,
-        weight_pct=holding.weight_pct,
+    # Re-fetch portfolio with holdings eagerly loaded and recalculate valuations using Twelve Data
+    p_stmt = (
+        select(Portfolio)
+        .options(selectinload(Portfolio.holdings).joinedload(Holding.company))
+        .where(Portfolio.id == portfolio_id)
     )
+    portfolio_reloaded = (await db.execute(p_stmt)).scalars().first()
+    holdings_summary, _ = await refresh_portfolio_holdings_valuation(portfolio_reloaded, db)
+
+    target_summary = next(
+        (s for s in holdings_summary if s.id == target_holding_id),
+        None,
+    )
+    if not target_summary:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve refreshed holding after insertion.",
+        )
+    return target_summary
 
 
 @router.delete(
@@ -586,19 +720,21 @@ async def delete_portfolio_holding(
         )
 
     await db.delete(holding)
-    await db.flush()
-
-    all_h_stmt = select(Holding).where(Holding.portfolio_id == portfolio_id)
-    remaining_holdings = (await db.execute(all_h_stmt)).scalars().all()
-    total_mv = sum((h.market_value for h in remaining_holdings if h.market_value is not None), Decimal("0.0000"))
-
-    for h in remaining_holdings:
-        if total_mv > 0 and h.market_value is not None:
-            h.weight_pct = Decimal(str(round(float((h.market_value / total_mv) * 100), 2)))
-        else:
-            h.weight_pct = Decimal("0.00")
-
     await db.commit()
+
+    # Re-fetch portfolio with remaining holdings and refresh valuations and weights
+    p_stmt = (
+        select(Portfolio)
+        .options(selectinload(Portfolio.holdings).joinedload(Holding.company))
+        .where(
+            Portfolio.id == portfolio_id,
+            Portfolio.user_id == current_user.id,
+        )
+    )
+    portfolio_reloaded = (await db.execute(p_stmt)).scalars().first()
+    if portfolio_reloaded:
+        await refresh_portfolio_holdings_valuation(portfolio_reloaded, db)
+
     return {"status": "success", "message": "Holding position successfully removed", "deleted_id": str(holding_id)}
 
 

@@ -90,6 +90,90 @@ class VerificationAgent:
         self.mcp = mcp_client or get_mcp_client()
         self.llm = llm_service or get_llm_service()
 
+    @staticmethod
+    def _calibrate_credibility(
+        reported_score: float,
+        url: str,
+        source_name: str,
+        facts_count: int,
+        speculative_count: int,
+    ) -> float:
+        """Calibrate raw credibility score based on primary domain authority and facts ratio."""
+        low_url = (url or "").lower()
+        low_src = (source_name or "").lower()
+
+        base = max(0.0, min(1.0, reported_score))
+
+        # Regulatory & official filings get high credibility baseline
+        if "sec.gov" in low_url or "justice.gov" in low_url or ".gov" in low_url:
+            base = max(base, 0.95)
+        # Established tier-1 financial wires
+        elif any(wire in low_url or wire in low_src for wire in ("reuters", "bloomberg", "wsj", "ft.com", "cnbc", "apnews")):
+            base = max(base, 0.85)
+
+        # Corroborated facts bonus / speculative claims penalty
+        if facts_count >= 2 and speculative_count == 0:
+            base = min(1.0, base + 0.05)
+        elif speculative_count > facts_count:
+            base = max(0.3, base - 0.15)
+
+        return round(base, 2)
+
+    @staticmethod
+    def _deterministic_classify(
+        title: str, snippet: str, url: str, source_name: str
+    ) -> tuple[str, str, str, float]:
+        """Classify event type, sentiment, and credibility deterministically using financial keywords."""
+        text = f"{title} {snippet}".lower()
+        low_url = (url or "").lower()
+        low_src = (source_name or "").lower()
+
+        # Domain credibility
+        if "sec.gov" in low_url or "justice.gov" in low_url or ".gov" in low_url:
+            credibility = 0.95
+            status = "VERIFIED"
+        elif any(w in low_url or w in low_src for w in ("reuters", "bloomberg", "wsj", "ft.com", "cnbc", "apnews")):
+            credibility = 0.85
+            status = "VERIFIED"
+        elif any(w in low_url or w in low_src for w in ("forbes", "businessinsider", "marketwatch", "barrons", "yahoo")):
+            credibility = 0.75
+            status = "VERIFIED"
+        else:
+            credibility = 0.55
+            status = "UNVERIFIED"
+
+        # Event type
+        if any(k in text for k in ("lawsuit", "sues", "sued", "court", "settlement", "plaintiff", "verdict", "injunction", "subpoena", "allegation")):
+            event_type = "LITIGATION"
+        elif any(k in text for k in ("antitrust", "sec", "ftc", "doj", "investigation", "probe", "fine", "penalty", "sanction", "compliance", "regulatory", "filing", "10-k", "10-q")):
+            event_type = "REGULATORY"
+        elif any(k in text for k in ("earnings", "revenue", "eps", "profit", "guidance", "quarterly", "fiscal", "results", "margin", "dividend")):
+            event_type = "EARNINGS"
+        elif any(k in text for k in ("inflation", "interest rate", "fed", "tariff", "recession", "gdp", "central bank", "currency", "treasury")):
+            event_type = "MACRO"
+        elif any(k in text for k in ("ceo", "cfo", "resigns", "resignation", "appointed", "executive", "board of directors", "departure", "management")):
+            event_type = "LEADERSHIP"
+        elif any(k in text for k in ("launch", "chip", "recall", "delay", "patent", "unveils", "discontinuation", "release", "product")):
+            event_type = "PRODUCT"
+        else:
+            event_type = "OTHER"
+
+        # Sentiment
+        bearish_keywords = ("plunge", "drop", "drops", "miss", "misses", "investigation", "sued", "lawsuit", "fine", "loss", "losses", "decline", "warns", "slump", "fall", "falls", "downgrade", "probe", "violation", "antitrust")
+        bullish_keywords = ("beat", "beats", "surge", "surges", "growth", "record", "jump", "rallies", "rally", "upgrade", "outperform", "soars", "gain", "gains", "profit surge", "exceeds", "expansion")
+
+        bear_count = sum(1 for k in bearish_keywords if k in text)
+        bull_count = sum(1 for k in bullish_keywords if k in text)
+
+        if bear_count > bull_count:
+            sentiment = "BEARISH"
+        elif bull_count > bear_count:
+            sentiment = "BULLISH"
+        else:
+            sentiment = "NEUTRAL"
+
+        return event_type, sentiment, status, credibility
+
     @traceable(name="Research & Verification Agent", run_type="chain")
     async def run(self, input_data: VerificationAgentInput) -> VerificationOutput:
         """
@@ -159,19 +243,28 @@ class VerificationAgent:
                     temperature=0.1,
                 )
 
-                if analysis.credibility_score < input_data.min_credibility_threshold:
-                    logger.info("Skipping low-credibility event (score=%.2f): '%s'", analysis.credibility_score, ev.title)
-                    TerminalLogger.log_agent_step(f"↳ [{ev.ticker}] Skipped low credibility ({analysis.credibility_score:.2f} < {input_data.min_credibility_threshold}): \"{ev.title[:50]}\"", level="warn")
+                # Cross-calibrate credibility score against domain authority
+                norm_credibility = self._calibrate_credibility(
+                    reported_score=analysis.credibility_score,
+                    url=ev.url,
+                    source_name=ev.source_name,
+                    facts_count=len(analysis.facts),
+                    speculative_count=len(analysis.speculative_claims),
+                )
+
+                if norm_credibility < input_data.min_credibility_threshold:
+                    logger.info("Skipping low-credibility event (score=%.2f): '%s'", norm_credibility, ev.title)
+                    TerminalLogger.log_agent_step(f"↳ [{ev.ticker}] Skipped low credibility ({norm_credibility:.2f} < {input_data.min_credibility_threshold}): \"{ev.title[:50]}\"", level="warn")
                     continue
 
                 facts_list = [
-                    VerifiedFact(statement=f_str, is_corroborated=True, confidence=analysis.credibility_score)
+                    VerifiedFact(statement=f_str, is_corroborated=True, confidence=norm_credibility)
                     for f_str in analysis.facts
                 ]
 
                 TerminalLogger.log_agent_step(
                     f"↳ [{ev.ticker}] Verified: Sentiment={analysis.sentiment} | "
-                    f"Credibility={analysis.credibility_score*100:.0f}% | "
+                    f"Credibility={norm_credibility*100:.0f}% | "
                     f"Status={analysis.verification_status} | "
                     f"Facts={len(facts_list)} | Speculative={len(analysis.speculative_claims)}"
                 )
@@ -185,7 +278,7 @@ class VerificationAgent:
                     event_type=analysis.event_type.upper(),
                     sentiment=analysis.sentiment.upper(),
                     verification_status=analysis.verification_status.upper(),
-                    credibility_score=analysis.credibility_score,
+                    credibility_score=norm_credibility,
                     primary_source_url=ev.url,
                     source_name=ev.source_name,
                     published_date=ev.publication_date,
@@ -198,22 +291,33 @@ class VerificationAgent:
 
             except Exception as exc:
                 logger.warning("LLM verification failed for '%s'; using deterministic fallback: %s", ev.title, exc)
-                # Fallback to deterministic verification when LLM generation is unavailable
+                # Robust data-driven fallback based on domain authority and financial lexicon
+                fb_event_type, fb_sentiment, fb_status, fb_credibility = self._deterministic_classify(
+                    title=ev.title,
+                    snippet=ev.snippet or "",
+                    url=ev.url or "",
+                    source_name=ev.source_name or "",
+                )
+
+                if fb_credibility < input_data.min_credibility_threshold:
+                    continue
+
+                snippet_clean = (ev.snippet or ev.title)[:200]
                 verified_event = VerifiedEvent(
                     company_name=ev.company_name,
                     ticker=ev.ticker,
                     company_id=ev.company_id,
                     canonical_title=ev.title,
                     verified_summary=ev.snippet or ev.title,
-                    event_type="OTHER",
-                    sentiment="NEUTRAL",
-                    verification_status="UNVERIFIED",
-                    credibility_score=0.6 if "sec.gov" in ev.url else 0.5,
+                    event_type=fb_event_type,
+                    sentiment=fb_sentiment,
+                    verification_status=fb_status,
+                    credibility_score=fb_credibility,
                     primary_source_url=ev.url,
                     source_name=ev.source_name,
                     published_date=ev.publication_date,
                     event_hash=canonical_hash,
-                    facts=[VerifiedFact(statement=ev.snippet[:150], is_corroborated=False, confidence=0.5)],
+                    facts=[VerifiedFact(statement=snippet_clean, is_corroborated=(fb_status == "VERIFIED"), confidence=fb_credibility)],
                     speculative_claims=[],
                     is_duplicate=False,
                 )

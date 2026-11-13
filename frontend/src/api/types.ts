@@ -115,6 +115,8 @@ export interface HoldingImpactItem {
   impact_score?: number | null
   weighted_portfolio_risk?: number | null
   deterministic_rationale?: string | null
+  risk_flag?: string | null
+  evidence_confidence?: number | null
 }
 
 export interface StructuredAlertSummaryItem {
@@ -124,6 +126,7 @@ export interface StructuredAlertSummaryItem {
   alert_type: string
   severity: string
   message: string
+  risk_flag?: string | null
   affected_holdings: string[]
   evidence_sources: string[]
   confidence: number

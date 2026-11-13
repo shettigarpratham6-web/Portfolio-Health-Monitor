@@ -40,6 +40,7 @@ class StructuredAlertItem(BaseModel):
     alert_type: str
     severity: str
     message: str
+    risk_flag: str = Field(default="BALANCED", description="Data-driven categorical risk flag")
     affected_holdings: List[str] = Field(default_factory=list)
     evidence_sources: List[str] = Field(default_factory=list)
     confidence: float = 1.0
@@ -96,12 +97,27 @@ class ReportingAgent:
         persisted_alerts = 0
         event_db_ids: Dict[str, str] = {}  # event_hash -> db event_id
 
+        # Map evaluated holding impacts by ticker and event title for exact severity calibration
+        impacts_by_event: Dict[str, str] = {}
+        for imp in impact_report.holding_impacts:
+            impacts_by_event[f"{imp.ticker}:{imp.event_title}"] = imp.impact_severity
+
         # 1. Optionally persist verified events and primary sources to database
         if persist:
             for ev in events:
                 if not ev.company_id:
                     continue
                 try:
+                    # Look up actual calculated impact severity if available, otherwise data-driven heuristic
+                    calibrated_sev = impacts_by_event.get(f"{ev.ticker}:{ev.canonical_title}")
+                    if not calibrated_sev:
+                        if ev.event_type in ("LITIGATION", "REGULATORY") and ev.sentiment == "BEARISH":
+                            calibrated_sev = "HIGH" if ev.credibility_score >= 0.75 else "MEDIUM"
+                        elif ev.event_type in ("EARNINGS", "MACRO"):
+                            calibrated_sev = "MEDIUM"
+                        else:
+                            calibrated_sev = "LOW"
+
                     res_ev = await self.mcp.call_tool(
                         tool_name="save_research_event",
                         arguments={
@@ -109,7 +125,7 @@ class ReportingAgent:
                             "title": ev.canonical_title,
                             "summary": ev.verified_summary,
                             "event_type": ev.event_type,
-                            "severity": "HIGH" if ev.event_type in ("EARNINGS", "REGULATORY") else "MEDIUM",
+                            "severity": calibrated_sev,
                             "sentiment": ev.sentiment,
                             "verification_status": ev.verification_status,
                             "published_date": ev.published_date,
@@ -145,24 +161,33 @@ class ReportingAgent:
         structured_alerts: List[StructuredAlertItem] = []
 
         for imp in impact_report.holding_impacts:
-            # Generate alerts for medium, high, or critical severity impacts
-            if imp.impact_severity in ("MEDIUM", "HIGH", "CRITICAL"):
+            # Generate alerts for adverse impacts or significant catalysts
+            if imp.impact_severity in ("MEDIUM", "HIGH", "CRITICAL") or (imp.impact_direction == "POSITIVE" and abs(imp.impact_score) >= 5.0):
                 ev_list = events_by_ticker.get(imp.ticker.upper(), [])
                 source_urls = [e.primary_source_url for e in ev_list if e.primary_source_url]
                 first_ev = ev_list[0] if ev_list else None
                 r_db_id = event_db_ids.get(first_ev.event_hash) if first_ev else None
 
-                alert_type = (
-                    "CRITICAL_EVENT" if imp.impact_severity == "CRITICAL"
-                    else "HOLDING_VOLATILITY" if imp.direct_exposure and abs(imp.impact_score) >= 6.0
-                    else "RESEARCH_UPDATE"
-                )
+                # Refine alert type based on data-driven risk flag
+                if imp.risk_flag in ("CRITICAL_CONCENTRATION_RISK", "CRITICAL_RISK"):
+                    alert_type = "CRITICAL_RISK"
+                elif imp.risk_flag in ("HIGH_EXPOSURE_RISK", "CONCENTRATION_RISK"):
+                    alert_type = "CONCENTRATION_RISK"
+                elif imp.risk_flag == "SECTOR_CONTAGION_RISK":
+                    alert_type = "SECTOR_CONTAGION"
+                elif imp.impact_direction == "POSITIVE":
+                    alert_type = "POSITIVE_CATALYST"
+                elif imp.direct_exposure and abs(imp.impact_score) >= 5.0:
+                    alert_type = "HOLDING_VOLATILITY"
+                else:
+                    alert_type = "RESEARCH_UPDATE"
 
                 alert_title = f"{imp.impact_severity} Impact on {imp.ticker}: {imp.event_title[:60]}"
                 alert_msg = (
                     f"Position {imp.ticker} ({imp.holding_weight_pct:.1f}% portfolio weight) "
                     f"is affected by verified {imp.event_type} event. "
-                    f"Impact score: {imp.impact_score:+.1f}/10. Rationale: {imp.deterministic_rationale}"
+                    f"Impact score: {imp.impact_score:+.1f}/10. Risk Flag: {imp.risk_flag}. "
+                    f"Rationale: {imp.deterministic_rationale}"
                 )
 
                 alert_id = None
@@ -199,6 +224,7 @@ class ReportingAgent:
                         alert_type=alert_type,
                         severity=imp.impact_severity,
                         message=alert_msg,
+                        risk_flag=imp.risk_flag,
                         affected_holdings=[imp.ticker],
                         evidence_sources=source_urls,
                         confidence=0.9 if imp.direct_exposure else 0.7,
@@ -206,12 +232,44 @@ class ReportingAgent:
                     )
                 )
 
-        exec_summary = (
-            f"Health monitoring completed for portfolio '{impact_report.portfolio_name}'. "
-            f"Evaluated {impact_report.total_events_evaluated} verified events. "
-            f"Aggregate risk rating: {impact_report.aggregate_risk_level}. "
-            f"Generated {len(structured_alerts)} actionable alerts."
-        )
+        # Formulate clear, concise executive findings synthesized from agent outputs
+        summary_parts = [
+            f"Autonomous surveillance for '{impact_report.portfolio_name}' concludes with an aggregate risk assessment of {impact_report.aggregate_risk_level}."
+        ]
+
+        if events:
+            top_events = [f"{e.ticker} ({e.event_type})" for e in events[:3]]
+            summary_parts.append(
+                f"Surveillance evaluated {len(events)} verified market catalysts, including disclosures for {', '.join(top_events)}."
+            )
+
+        critical_or_high = [imp for imp in impact_report.holding_impacts if imp.impact_severity in ("CRITICAL", "HIGH")]
+        favorable = [imp for imp in impact_report.holding_impacts if imp.impact_direction == "POSITIVE"]
+
+        if critical_or_high:
+            affected_tickers = [f"{imp.ticker} [{imp.risk_flag.replace('_', ' ')}]" for imp in critical_or_high]
+            summary_parts.append(
+                f"Elevated risk exposure identified on: {', '.join(affected_tickers)}."
+            )
+        elif favorable:
+            summary_parts.append(
+                "Evaluated holdings exhibit favorable catalyst momentum with zero adverse downside risk."
+            )
+        else:
+            summary_parts.append(
+                "All equity holdings remain within baseline risk and concentration parameters."
+            )
+
+        if structured_alerts:
+            summary_parts.append(
+                f"{len(structured_alerts)} actionable incident alert(s) have been generated for monitoring and compliance review."
+            )
+        else:
+            summary_parts.append(
+                "No adverse risk events required alert escalation."
+            )
+
+        exec_summary = " ".join(summary_parts)
 
         return MonitoringReport(
             portfolio_id=p_id,

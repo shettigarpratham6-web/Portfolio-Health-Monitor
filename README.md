@@ -19,12 +19,13 @@ Instead of relying on speculative LLM outputs, Portfolio Health Monitor enforces
 
 - **Autonomous 6-Agent LangGraph Pipeline**: Turn-taking cyclic state machine orchestrates specialized agents with hard loop boundaries and checkpointed memory.
 - **FastMCP Tool Ecosystem**: Decoupled tool servers isolating database operations, Tavily real-time news search, and deterministic financial mathematics.
+- **Real-Time Market Data & FX Engine (Twelve Data)**: Live market quote engine supporting multi-symbol batching, in-memory TTL caching, multi-currency normalization (USD/INR), purchase-history weighted average buy prices, and exact Decimal arithmetic ($\text{Market Value} = \text{Shares} \times \text{Current Price}$).
 - **Real-Time Terminal Execution Visibility**: High-contrast, structured ANSI console logging with live phase banners, tool calls, parameter inspections, and precise per-agent execution timers for both autonomous monitoring and AI Copilot queries.
 - **Comprehensive Multi-Tab Surveillance Reporting**: Detailed frontend intelligence report featuring live internet discoveries with direct external source links, verified evidence with credibility scores, corroborated facts, quantitative asset exposure calculations, and 1-click audit exports (`.txt` and `.json`).
 - **Compact Human-Readable Database IDs**: PostgreSQL database utilizes concise prefixed identifiers (`usr_`, `port_`, `comp_`, `hold_`, `ev_`, `src_`, `alt_`) that fit neatly in table displays while preserving full UUID relational integrity.
 - **Modern Minimalist Frontend (React + Vite)**: SaaS interface inspired by clean, modern AI design systems, featuring an interactive Three.js 3D character with pointer tracking, 3D coverflow feature showcase, live pipeline visualization, and instant 1-click demo analyst sessions.
 - **Universal Observability**: End-to-end distributed tracing across all agent reasoning chains, tool invocations, and token usage via LangSmith.
-- **Production-Ready Test Suite**: 96 automated unit and integration tests covering multi-agent graphs, security guardrails, FastMCP servers, and API routes.
+- **Production-Ready Test Suite**: 105 automated unit and integration tests covering multi-agent graphs, Twelve Data integration, security guardrails, FastMCP servers, and API routes.
 
 ---
 
@@ -81,6 +82,7 @@ flowchart TD
 | **Agent Abstractions** | **LangChain Core** | `0.3.x` | Chat message models, prompt templates, and tool bindings |
 | **Tool Protocol** | **FastMCP** | `1.30.x` | Model Context Protocol v1 tool server isolation and parameter validation |
 | **LLM Gateway** | **OpenRouter API** | — | Unified API proxy routing to Claude 3.5 Sonnet, GPT-4o, and fallbacks |
+| **Market Data & FX** | **Twelve Data API** | — | Real-time equity quotes, batch requests, and live USD/INR FX conversion |
 | **Web Research** | **Tavily API** | — | Real-time financial search, news gathering, and SEC filing indexing |
 | **Observability** | **LangSmith** | `0.14.x` | Real-time distributed tracing, prompt inspection, and token cost tracking |
 | **Database** | **PostgreSQL** | `16.x` | Relational store for users, portfolios, holdings, events, and alerts |
@@ -90,7 +92,7 @@ flowchart TD
 | **Frontend Build Tool**| **Vite** | `8.x` | Ultra-fast client development server and production bundler |
 | **Styling & Icons** | **Tailwind CSS / Lucide**| `4.x / 1.x` | Modern styling, typography, and SVG icons |
 | **3D Graphics** | **Three.js** | `0.182.x` | Procedural 3D agent character with interactive mouse tracking |
-| **Testing** | **pytest & pytest-asyncio**| `9.x / 1.4.x` | Automated test suite (96 passing unit/integration tests) |
+| **Testing** | **pytest & pytest-asyncio**| `9.x / 1.4.x` | Automated test suite (105 passing unit/integration tests) |
 
 ---
 
@@ -115,7 +117,7 @@ agentx/
 │   ├── mcp/                          # FastMCP tool servers (Database, Research, Analysis)
 │   ├── models/                       # SQLAlchemy database models with ShortIdMixin
 │   ├── schemas/                      # Pydantic validation contracts
-│   ├── services/                     # Low-level research, scraper, and LLM clients
+│   ├── services/                     # Research (Tavily), LLM (OpenRouter), and Market Data (Twelve Data)
 │   └── main.py                       # FastAPI application entry point & lifespan
 ├── frontend/                         # Modern React 19 + Vite frontend
 │   ├── src/
@@ -134,14 +136,15 @@ agentx/
 │   └── vite.config.ts                # Vite config with backend proxy (/api, /health)
 ├── migrations/                       # Alembic schema versioning scripts
 │   └── versions/                     # Migration scripts (Initial schema, Compact Short IDs)
-├── tests/                            # Automated test suite (96 tests)
+├── tests/                            # Automated test suite (105 tests)
 │   ├── test_agents.py                # Multi-agent unit tests
 │   ├── test_api.py                   # REST endpoints integration tests
 │   ├── test_auth.py                  # JWT authentication tests
 │   ├── test_graph.py                 # LangGraph state machine execution tests
 │   ├── test_guardrails.py            # Prompt injection & SEC compliance tests
 │   ├── test_mcp.py                   # FastMCP tool registrations and invocations
-│   └── test_tracing.py               # LangSmith telemetry validation
+│   ├── test_tracing.py               # LangSmith telemetry validation
+│   └── test_twelve_data.py           # Twelve Data live quotes, batching, FX rates, weighted averages
 ├── alembic.ini                       # Alembic database migration configuration
 ├── requirements.txt                  # Python dependencies
 └── README.md                         # Project documentation
@@ -267,6 +270,9 @@ cd agentx
 | `OPENROUTER_DEFAULT_MODEL`| Primary reasoning model for agent execution | `anthropic/claude-3.5-sonnet` |
 | `OPENROUTER_FALLBACK_MODEL`| Fallback model used in case of provider outage | `openai/gpt-4o-mini` |
 | `TAVILY_API_KEY` | Tavily API key for real-time financial search | `your-tavily-key` |
+| `TWELVE_DATA_API_KEY` | Twelve Data API key for real-time market prices and FX conversion | `your-twelve-data-key` |
+| `TWELVE_DATA_BASE_URL` | Base URL for Twelve Data API endpoints | `https://api.twelvedata.com` |
+| `TWELVE_DATA_CACHE_TTL_SECONDS` | In-memory cache TTL (seconds) to prevent rate limit spikes | `300` |
 | `LANGCHAIN_TRACING_V2` | Set to `true` to enable cloud tracing in LangSmith | `true` |
 | `LANGCHAIN_API_KEY` | LangSmith API key for telemetry export | `your-langsmith-key` |
 | `LANGCHAIN_PROJECT` | Target project name in LangSmith | `agentx-portfolio-health` |
@@ -308,9 +314,9 @@ All protected endpoints require an `Authorization: Bearer <token>` header obtain
 | **Authentication** | `GET` | `/api/v1/auth/me` | Returns profile details for the currently authenticated user. |
 | **Portfolios** | `POST` | `/api/v1/portfolios` | Creates a new investment portfolio scoped to the current user. |
 | **Portfolios** | `GET` | `/api/v1/portfolios` | Returns paginated list of user portfolios (`page`, `page_size`). |
-| **Portfolios** | `GET` | `/api/v1/portfolios/{id}` | Retrieves full portfolio details and active asset allocations. |
-| **Holdings** | `POST` | `/api/v1/portfolios/{id}/holdings` | Dynamically adds an asset position (ticker, shares, buy price) and rebalances weights. |
-| **Holdings** | `DELETE` | `/api/v1/portfolios/{id}/holdings/{holding_id}` | Removes a holding position and recalculates portfolio allocation weights. |
+| **Portfolios** | `GET` | `/api/v1/portfolios/{id}` | Retrieves full portfolio details, real-time Twelve Data valuations, and normalized asset weights. |
+| **Holdings** | `POST` | `/api/v1/portfolios/{id}/holdings` | Adds an asset position; computes purchase-history weighted average buy price if ticker exists. |
+| **Holdings** | `DELETE` | `/api/v1/portfolios/{id}/holdings/{holding_id}` | Removes a holding position and dynamically rebalances portfolio weights to 100%. |
 | **Monitoring** | `POST` | `/api/v1/portfolios/{id}/monitor` | Initiates the autonomous multi-agent LangGraph monitoring workflow. |
 | **Alerts** | `GET` | `/api/v1/portfolios/{id}/alerts` | Lists persisted risk alerts for a portfolio with severity filtering. |
 | **Alerts** | `PATCH` | `/api/v1/portfolios/{id}/alerts/{alert_id}` | Updates alert lifecycle status (`ACTIVE` -> `ACKNOWLEDGED` -> `RESOLVED`). |
@@ -326,7 +332,7 @@ All protected endpoints require an `Authorization: Bearer <token>` header obtain
 The project includes an exhaustive automated test suite covering all modules:
 
 ```powershell
-# Run the complete test suite (96 passing tests)
+# Run the complete test suite (105 passing tests)
 .venv\Scripts\python.exe -m pytest -v
 
 # Run tests with condensed output

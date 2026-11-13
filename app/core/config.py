@@ -221,6 +221,24 @@ class Settings(BaseSettings):
     )
 
     # --------------------------------------------------------------------------
+    # Market Data: Twelve Data API
+    # --------------------------------------------------------------------------
+    TWELVE_DATA_API_KEY: Optional[SecretStr] = Field(
+        default=None,
+        description="Twelve Data API key for real-time market quotes and FX rates",
+    )
+    TWELVE_DATA_BASE_URL: str = Field(
+        default="https://api.twelvedata.com",
+        description="Twelve Data API base URL",
+    )
+    TWELVE_DATA_CACHE_TTL_SECONDS: int = Field(
+        default=300,
+        ge=10,
+        le=86400,
+        description="Cache TTL in seconds for market quotes and exchange rates",
+    )
+
+    # --------------------------------------------------------------------------
     # Observability: LangSmith
     # --------------------------------------------------------------------------
     LANGCHAIN_TRACING_V2: bool = Field(

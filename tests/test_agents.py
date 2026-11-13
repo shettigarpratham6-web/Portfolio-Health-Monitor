@@ -820,3 +820,147 @@ async def test_supervisor_phase_failure_resilience():
     assert output.execution_plan.phases[1].status == PhaseStatus.FAILED
     assert output.execution_plan.phases[4].status == PhaseStatus.COMPLETED
     assert output.monitoring_report is not None
+
+
+@pytest.mark.asyncio
+async def test_impact_agent_data_driven_risk_flags_and_scoring():
+    """Verify that scoring and risk flags are data-driven, consistent, and distinguish adverse risk from positive catalysts."""
+    mock_mcp = MagicMock(spec=MCPClient)
+    mock_llm = MagicMock(spec=LLMService)
+
+    p_context = PortfolioContext(
+        portfolio_id="p-test-scoring",
+        name="Precision Test Portfolio",
+        currency="USD",
+        total_cost=10000.0,
+        total_market_value=12000.0,
+        unrealized_gain_loss=2000.0,
+        unrealized_gain_loss_pct=20.0,
+        holdings=[
+            HoldingContext(
+                holding_id="h-nvda",
+                company_id="c-nvda",
+                ticker="NVDA",
+                company_name="NVIDIA Corp.",
+                sector="Technology",
+                shares=30.0,
+                buy_price=100.0,
+                current_price=150.0,
+                cost_basis=3000.0,
+                market_value=4500.0,
+                weight_pct=40.0,  # High concentration
+                unrealized_gain_loss=1500.0,
+                unrealized_gain_loss_pct=50.0,
+            ),
+            HoldingContext(
+                holding_id="h-aapl",
+                company_id="c-aapl",
+                ticker="AAPL",
+                company_name="Apple Inc.",
+                sector="Technology",
+                shares=50.0,
+                buy_price=150.0,
+                current_price=150.0,
+                cost_basis=7500.0,
+                market_value=7500.0,
+                weight_pct=60.0,
+                unrealized_gain_loss=0.0,
+                unrealized_gain_loss_pct=0.0,
+            ),
+        ],
+        tickers=["NVDA", "AAPL"],
+        dominant_sector="Technology",
+        dominant_sector_pct=100.0,
+        concentration_risk_level="HIGH",
+        summary_analysis="Concentrated Tech Portfolio",
+    )
+
+    # 1. High-credibility adverse regulatory lawsuit against NVDA (40% weight)
+    # 2. Bullish earnings surge for AAPL
+    verified_events = [
+        VerifiedEvent(
+            company_name="NVIDIA Corp.",
+            ticker="NVDA",
+            canonical_title="Antitrust Regulator Initiates Formal Monopoly Investigation into AI Chip Bundling",
+            verified_summary="DOJ issues formal civil subpoenas regarding GPU software locks.",
+            event_type="REGULATORY",
+            sentiment="BEARISH",
+            verification_status="VERIFIED",
+            credibility_score=0.95,
+            primary_source_url="https://justice.gov/news/nvidia-subpoena",
+            source_name="US Department of Justice",
+            published_date="2026-11-10T10:00:00Z",
+            event_hash="hash-nvda-subpoena",
+            facts=[VerifiedFact(statement="Subpoenas served to executive team", confidence=1.0)],
+        ),
+        VerifiedEvent(
+            company_name="Apple Inc.",
+            ticker="AAPL",
+            canonical_title="Apple Beats Q4 Consensus with Record Services Revenue",
+            verified_summary="Apple reports $95B quarterly revenue exceeding analyst expectations.",
+            event_type="EARNINGS",
+            sentiment="BULLISH",
+            verification_status="VERIFIED",
+            credibility_score=0.90,
+            primary_source_url="https://reuters.com/apple-q4-results",
+            source_name="Reuters",
+            published_date="2026-11-10T16:00:00Z",
+            event_hash="hash-aapl-q4",
+            facts=[VerifiedFact(statement="Revenue of $95B beat consensus", confidence=0.95)],
+        ),
+    ]
+
+    agent = ImpactAgent(llm_service=mock_llm, mcp_client=mock_mcp)
+    report = await agent.run(ImpactAgentInput(portfolio_context=p_context, verified_events=verified_events))
+
+    assert len(report.holding_impacts) == 2
+
+    # Check NVDA impact: adverse, concentrated, properly flagged
+    nvda_impact = next(i for i in report.holding_impacts if i.ticker == "NVDA")
+    assert nvda_impact.impact_direction == "NEGATIVE"
+    assert nvda_impact.impact_score < -5.0
+    assert nvda_impact.weighted_portfolio_risk > 1.5
+    assert nvda_impact.impact_severity == "CRITICAL"
+    assert nvda_impact.risk_flag == "CRITICAL_CONCENTRATION_RISK"
+    assert nvda_impact.evidence_confidence >= 0.90
+
+    # Check AAPL impact: favorable, 0 downside risk, not falsely flagged as risk crisis
+    aapl_impact = next(i for i in report.holding_impacts if i.ticker == "AAPL")
+    assert aapl_impact.impact_direction == "POSITIVE"
+    assert aapl_impact.impact_score > 5.0
+    assert aapl_impact.weighted_portfolio_risk == 0.0  # Zero downside risk
+    assert aapl_impact.impact_severity == "LOW"  # Low downside risk
+    assert "CATALYST" in aapl_impact.risk_flag
+
+
+@pytest.mark.asyncio
+async def test_verification_agent_domain_calibration():
+    """Verify that domain authority calibration and keyword-based deterministic classification operate accurately."""
+    mock_mcp = MagicMock(spec=MCPClient)
+    mock_llm = MagicMock(spec=LLMService)
+
+    # Mock LLM failure to trigger deterministic fallback
+    mock_llm.generate_structured = AsyncMock(side_effect=RuntimeError("LLM unavailable"))
+    mock_mcp.call_tool = AsyncMock(return_value={"is_duplicate": False, "canonical_hash": "mock-hash"})
+
+    agent = VerificationAgent(llm_service=mock_llm, mcp_client=mock_mcp)
+
+    events = [
+        DiscoveredEvent(
+            ticker="GOOGL",
+            company_name="Alphabet Inc.",
+            title="Antitrust Court Ruling Orders Google to Disgorge Monopolistic Ad Tech Revenue",
+            snippet="Federal judge finds Google violated antitrust laws in ad tech monopoly lawsuit with heavy fines.",
+            url="https://justice.gov/press-release/google-adtech-ruling",
+            source_name="Department of Justice",
+            publication_date="2026-11-08",
+        )
+    ]
+
+    out = await agent.run(VerificationAgentInput(discovered_events=events))
+    assert out.total_verified == 1
+    v = out.verified_events[0]
+    assert v.event_type in ("LITIGATION", "REGULATORY")
+    assert v.sentiment == "BEARISH"
+    assert v.credibility_score >= 0.90
+    assert v.verification_status == "VERIFIED"

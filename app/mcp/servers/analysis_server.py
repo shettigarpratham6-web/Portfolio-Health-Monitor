@@ -115,71 +115,83 @@ async def calculate_portfolio_allocation(
             },
         }
 
-    total_cost = 0.0
-    total_market_value = 0.0
+    total_cost_dec = Decimal("0.0000")
+    total_market_val_dec = Decimal("0.0000")
     computed_holdings: List[Dict[str, Any]] = []
 
     for pos in positions:
-        shares = float(pos.get("shares", 0.0))
-        buy_price = float(pos.get("average_buy_price", 0.0))
-        curr_price = float(pos.get("current_price", buy_price))
+        shares = Decimal(str(pos.get("shares", 0)))
+        buy_price = Decimal(str(pos.get("average_buy_price", 0)))
+        curr_price = Decimal(str(pos.get("current_price") or buy_price))
 
         pos_cost = shares * buy_price
         pos_market_val = shares * curr_price
 
-        total_cost += pos_cost
-        total_market_value += pos_market_val
+        total_cost_dec += pos_cost
+        total_market_val_dec += pos_market_val
 
         computed_holdings.append(
             {
                 "ticker": pos.get("ticker", "UNKNOWN"),
                 "company_name": pos.get("company_name", ""),
-                "shares": shares,
-                "buy_price": buy_price,
-                "current_price": curr_price,
-                "cost_basis": round(pos_cost, 2),
-                "market_value": round(pos_market_val, 2),
+                "shares": float(shares),
+                "buy_price": float(buy_price),
+                "current_price": float(curr_price),
+                "cost_basis": float(round(pos_cost, 2)),
+                "market_value": float(round(pos_market_val, 2)),
+                "_cost_dec": pos_cost,
+                "_mv_dec": pos_market_val,
             }
         )
 
-    # Calculate weights and concentration metrics
-    hhi = 0.0
-    top_weight = 0.0
+    # Calculate weights and concentration metrics using exact Decimal math
+    hhi = Decimal("0.0")
+    top_weight = Decimal("0.0")
     for h in computed_holdings:
-        weight_pct = (h["market_value"] / total_market_value * 100) if total_market_value > 0 else 0.0
-        h["weight_pct"] = round(weight_pct, 2)
-        gain_loss = h["market_value"] - h["cost_basis"]
-        gain_loss_pct = (gain_loss / h["cost_basis"] * 100) if h["cost_basis"] > 0 else 0.0
-        h["unrealized_gain_loss"] = round(gain_loss, 2)
-        h["unrealized_gain_loss_pct"] = round(gain_loss_pct, 2)
+        mv_dec = h.pop("_mv_dec")
+        cost_dec = h.pop("_cost_dec")
+        if total_market_val_dec > Decimal("0"):
+            weight_pct = (mv_dec / total_market_val_dec) * Decimal("100")
+        else:
+            weight_pct = Decimal("0.0")
 
-        if weight_pct > top_weight:
-            top_weight = weight_pct
-        hhi += weight_pct ** 2
+        weight_rounded = round(weight_pct, 2)
+        h["weight_pct"] = float(weight_rounded)
+
+        gain_loss = mv_dec - cost_dec
+        gain_loss_pct = (gain_loss / cost_dec * Decimal("100")) if cost_dec > Decimal("0") else Decimal("0.0")
+        h["unrealized_gain_loss"] = float(round(gain_loss, 2))
+        h["unrealized_gain_loss_pct"] = float(round(gain_loss_pct, 2))
+
+        if weight_rounded > top_weight:
+            top_weight = weight_rounded
+        hhi += weight_rounded ** 2
 
     # Assess concentration risk based on HHI guidelines (FTC/DOJ thresholds adapted for portfolios)
-    if hhi > 2500 or top_weight > 30.0:
+    top_weight_float = float(top_weight)
+    hhi_float = float(hhi)
+    if hhi_float > 2500 or top_weight_float > 30.0:
         risk_level = "HIGH"
-    elif hhi > 1500 or top_weight > 20.0:
+    elif hhi_float > 1500 or top_weight_float > 20.0:
         risk_level = "MODERATE"
     else:
         risk_level = "LOW"
 
-    unrealized_gl = total_market_value - total_cost
-    unrealized_gl_pct = (unrealized_gl / total_cost * 100) if total_cost > 0 else 0.0
+    unrealized_gl = total_market_val_dec - total_cost_dec
+    unrealized_gl_pct = (unrealized_gl / total_cost_dec * Decimal("100")) if total_cost_dec > Decimal("0") else Decimal("0.0")
 
     return {
         "status": "success",
         "portfolio_id": portfolio_id,
         "holdings_count": len(computed_holdings),
-        "total_cost": round(total_cost, 2),
-        "total_market_value": round(total_market_value, 2),
-        "unrealized_gain_loss": round(unrealized_gl, 2),
-        "unrealized_gain_loss_pct": round(unrealized_gl_pct, 2),
+        "total_cost": float(round(total_cost_dec, 2)),
+        "total_market_value": float(round(total_market_val_dec, 2)),
+        "unrealized_gain_loss": float(round(unrealized_gl, 2)),
+        "unrealized_gain_loss_pct": float(round(unrealized_gl_pct, 2)),
         "allocations": sorted(computed_holdings, key=lambda x: x["weight_pct"], reverse=True),
         "concentration_metrics": {
-            "top_holding_pct": round(top_weight, 2),
-            "hhi_index": round(hhi, 1),
+            "top_holding_pct": top_weight_float,
+            "hhi_index": round(hhi_float, 1),
             "risk_level": risk_level,
         },
     }

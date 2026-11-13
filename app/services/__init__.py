@@ -27,8 +27,17 @@ from app.services.research import (
     is_safe_url,
     normalize_url,
 )
+from app.services.twelve_data import (
+    QuoteResult,
+    TwelveDataService,
+    get_twelve_data_service,
+)
 
 __all__ = [
+    # Market Data
+    "TwelveDataService",
+    "QuoteResult",
+    "get_twelve_data_service",
     # LLM
     "LLMService",
     "get_llm_service",

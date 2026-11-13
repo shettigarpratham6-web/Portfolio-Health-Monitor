@@ -30,6 +30,13 @@ interface PortfolioManagerProps {
   onTriggerMonitor: (portfolioId: string) => void
 }
 
+const getCurrencySymbol = (currency?: string) => {
+  if (currency === 'INR') return '₹'
+  if (currency === 'EUR') return '€'
+  if (currency === 'GBP') return '£'
+  return '$'
+}
+
 export const PortfolioManager: React.FC<PortfolioManagerProps> = ({
   selectedPortfolioId,
   onClearSelectedPortfolio,
@@ -375,7 +382,7 @@ export const PortfolioManager: React.FC<PortfolioManagerProps> = ({
                         <div key={h.id} className="flex items-center gap-1.5">
                           <span className={`w-2 h-2 rounded-full bg-current ${colors[i % colors.length]}`} />
                           <span className="font-bold">{h.ticker || 'Holding'}:</span>
-                          <span>{h.weight_pct ? `${Number(h.weight_pct)}%` : 'N/A'}</span>
+                          <span>{h.weight_pct !== null && h.weight_pct !== undefined ? `${Number(h.weight_pct).toFixed(2)}%` : 'N/A'}</span>
                         </div>
                       )
                     })}
@@ -418,40 +425,43 @@ export const PortfolioManager: React.FC<PortfolioManagerProps> = ({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-neutral-100">
-                        {detail.holdings.map((h) => (
-                          <tr key={h.id} className="hover:bg-neutral-50/70 transition-colors">
-                            <td className="py-3 px-3 font-mono font-bold text-neutral-950">
-                              {h.ticker || 'N/A'}
-                            </td>
-                            <td className="py-3 px-3 text-neutral-700">
-                              {h.company_name || 'Verified Corporation'}
-                            </td>
-                            <td className="py-3 px-3 text-right font-mono text-neutral-900">
-                              {Number(h.shares).toLocaleString()}
-                            </td>
-                            <td className="py-3 px-3 text-right font-mono text-neutral-600">
-                              ${Number(h.average_buy_price).toFixed(2)}
-                            </td>
-                            <td className="py-3 px-3 text-right font-mono text-neutral-900 font-semibold">
-                              ${Number(h.current_price || h.average_buy_price).toFixed(2)}
-                            </td>
-                            <td className="py-3 px-3 text-right font-mono font-bold text-emerald-700">
-                              {h.weight_pct ? `${Number(h.weight_pct).toFixed(1)}%` : '—'}
-                            </td>
-                            <td className="py-3 px-3 text-right font-mono font-bold text-neutral-950">
-                              ${Number(h.market_value || 0).toLocaleString()}
-                            </td>
-                            <td className="py-3 px-3 text-center">
-                              <button
-                                onClick={() => handleDeleteHolding(h.id, h.ticker)}
-                                title="Remove position"
-                                className="p-1.5 text-neutral-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
+                        {detail.holdings.map((h) => {
+                          const currSym = getCurrencySymbol(detail.currency)
+                          return (
+                            <tr key={h.id} className="hover:bg-neutral-50/70 transition-colors">
+                              <td className="py-3 px-3 font-mono font-bold text-neutral-950">
+                                {h.ticker || 'N/A'}
+                              </td>
+                              <td className="py-3 px-3 text-neutral-700">
+                                {h.company_name || 'Verified Corporation'}
+                              </td>
+                              <td className="py-3 px-3 text-right font-mono text-neutral-900">
+                                {Number(h.shares).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 4 })}
+                              </td>
+                              <td className="py-3 px-3 text-right font-mono text-neutral-600">
+                                {currSym}{Number(h.average_buy_price).toFixed(2)}
+                              </td>
+                              <td className="py-3 px-3 text-right font-mono text-neutral-900 font-semibold">
+                                {currSym}{Number(h.current_price || h.average_buy_price).toFixed(2)}
+                              </td>
+                              <td className="py-3 px-3 text-right font-mono font-bold text-emerald-700">
+                                {h.weight_pct !== null && h.weight_pct !== undefined ? `${Number(h.weight_pct).toFixed(2)}%` : '—'}
+                              </td>
+                              <td className="py-3 px-3 text-right font-mono font-bold text-neutral-950">
+                                {currSym}{Number(h.market_value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                              <td className="py-3 px-3 text-center">
+                                <button
+                                  onClick={() => handleDeleteHolding(h.id, h.ticker)}
+                                  title="Remove position"
+                                  className="p-1.5 text-neutral-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </td>
+                            </tr>
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -528,6 +538,7 @@ export const PortfolioManager: React.FC<PortfolioManagerProps> = ({
                   className="w-full px-3.5 py-2.5 bg-neutral-50 border border-neutral-200 rounded-xl text-xs text-neutral-900 focus:outline-none focus:ring-2 focus:ring-black"
                 >
                   <option value="USD">USD ($)</option>
+                  <option value="INR">INR (₹)</option>
                   <option value="EUR">EUR (€)</option>
                   <option value="GBP">GBP (£)</option>
                 </select>

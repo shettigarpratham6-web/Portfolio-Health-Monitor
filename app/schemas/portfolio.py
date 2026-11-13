@@ -254,6 +254,8 @@ class HoldingImpactItem(BaseModel):
     impact_score: Optional[float] = None
     weighted_portfolio_risk: Optional[float] = None
     deterministic_rationale: Optional[str] = None
+    risk_flag: Optional[str] = None
+    evidence_confidence: Optional[float] = None
 
 
 class StructuredAlertSummaryItem(BaseModel):
@@ -264,6 +266,7 @@ class StructuredAlertSummaryItem(BaseModel):
     alert_type: str
     severity: str
     message: str
+    risk_flag: Optional[str] = None
     affected_holdings: List[str] = Field(default_factory=list)
     evidence_sources: List[str] = Field(default_factory=list)
     confidence: float = 1.0
