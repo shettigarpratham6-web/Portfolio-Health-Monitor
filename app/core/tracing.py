@@ -60,7 +60,7 @@ def mask_sensitive_payload(data: Any, max_depth: int = 5) -> Any:
 
 def setup_tracing() -> bool:
     """
-    Configures LangSmith tracing through environment variables as required by LangChain.
+    Configures LangSmith tracing through environment variables as required by LangChain & LangSmith.
     Enables tracing when configured or explicitly disables tracing without crashing.
     """
     settings = get_settings()
@@ -69,9 +69,13 @@ def setup_tracing() -> bool:
         api_key = settings.LANGCHAIN_API_KEY.get_secret_value()
         if api_key and not api_key.startswith("your-langsmith-api-key"):
             os.environ["LANGCHAIN_TRACING_V2"] = "true"
+            os.environ["LANGSMITH_TRACING"] = "true"
             os.environ["LANGCHAIN_API_KEY"] = api_key
+            os.environ["LANGSMITH_API_KEY"] = api_key
             os.environ["LANGCHAIN_PROJECT"] = settings.LANGCHAIN_PROJECT
+            os.environ["LANGSMITH_PROJECT"] = settings.LANGCHAIN_PROJECT
             os.environ["LANGCHAIN_ENDPOINT"] = settings.LANGCHAIN_ENDPOINT
+            os.environ["LANGSMITH_ENDPOINT"] = settings.LANGCHAIN_ENDPOINT
             logger.info(
                 "LangSmith tracing enabled | project=%s | endpoint=%s",
                 settings.LANGCHAIN_PROJECT,
@@ -81,6 +85,7 @@ def setup_tracing() -> bool:
 
     # Tracing is disabled in configuration or credentials are absent
     os.environ["LANGCHAIN_TRACING_V2"] = "false"
+    os.environ["LANGSMITH_TRACING"] = "false"
     logger.debug("LangSmith tracing is disabled in configuration.")
     return False
 

@@ -60,7 +60,7 @@ flowchart TD
     subgraph StorageObservability ["🗄️ 5. Persistence & External Services"]
         PG[("PostgreSQL 16\n(Compact Views & Triggers)")]
         TavilyAPI["Tavily Search API"]
-        OpenRouter["OpenRouter (Claude 3.5 Sonnet / GPT-4o)"]
+        OpenRouter["OpenRouter (DeepSeek V3.2 / Qwen3 30B A3B)"]
         LangSmith["LangSmith Cloud Tracing"]
     end
     
@@ -81,7 +81,7 @@ flowchart TD
 | **Agent Orchestrator** | **LangGraph** | `0.2.x` | Directed cyclic state graphs, checkpointing, phase transitions |
 | **Agent Abstractions** | **LangChain Core** | `0.3.x` | Chat message models, prompt templates, and tool bindings |
 | **Tool Protocol** | **FastMCP** | `1.30.x` | Model Context Protocol v1 tool server isolation and parameter validation |
-| **LLM Gateway** | **OpenRouter API** | — | Unified API proxy routing to Claude 3.5 Sonnet, GPT-4o, and fallbacks |
+| **LLM Gateway** | **OpenRouter API** | — | Unified API proxy routing to DeepSeek V3.2,Qwen3 30B A3B and fallbacks |
 | **Market Data & FX** | **Twelve Data API** | — | Real-time equity quotes, batch requests, and live USD/INR FX conversion |
 | **Web Research** | **Tavily API** | — | Real-time financial search, news gathering, and SEC filing indexing |
 | **Observability** | **LangSmith** | `0.14.x` | Real-time distributed tracing, prompt inspection, and token cost tracking |
@@ -267,8 +267,8 @@ cd agentx
 | `POSTGRES_USER` | PostgreSQL user account | `postgres` |
 | `POSTGRES_PASSWORD` | PostgreSQL user password | `postgres` |
 | `OPENROUTER_API_KEY` | OpenRouter API key for frontier LLM access | `your-openrouter-key` |
-| `OPENROUTER_DEFAULT_MODEL`| Primary reasoning model for agent execution | `anthropic/claude-3.5-sonnet` |
-| `OPENROUTER_FALLBACK_MODEL`| Fallback model used in case of provider outage | `openai/gpt-4o-mini` |
+| `OPENROUTER_DEFAULT_MODEL`| Primary reasoning model for agent execution | `deepseek/deepseek-v3.2` |
+| `OPENROUTER_FALLBACK_MODEL`| Fallback model used in case of provider outage | `qwen/qwen3-30b-a3b` |
 | `TAVILY_API_KEY` | Tavily API key for real-time financial search | `your-tavily-key` |
 | `TWELVE_DATA_API_KEY` | Twelve Data API key for real-time market prices and FX conversion | `your-twelve-data-key` |
 | `TWELVE_DATA_BASE_URL` | Base URL for Twelve Data API endpoints | `https://api.twelvedata.com` |

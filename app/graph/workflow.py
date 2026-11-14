@@ -36,6 +36,7 @@ from app.agents.verification_agent import (
     VerificationOutput,
 )
 from app.core.config import get_settings
+from app.core.tracing import setup_tracing
 from app.graph.state import (
     DEFAULT_NON_ADVISORY_NOTICE,
     AgentXState,
@@ -131,6 +132,8 @@ class AgentXWorkflow:
         self.reporting_agent = reporting_agent or ReportingAgent(
             llm_service=self.llm, mcp_client=self.mcp
         )
+        # Ensure LangSmith tracing environment is active
+        setup_tracing()
 
     # --------------------------------------------------------------------------
     # Workflow Node Callables
@@ -1070,7 +1073,8 @@ class AgentXWorkflow:
         """
         Execute compiled graph with standardized LangSmith tracing run config.
         """
-        from app.core.tracing import get_langchain_run_config
+        from app.core.tracing import get_langchain_run_config, setup_tracing
+        setup_tracing()
         graph = self.compile(checkpointer=checkpointer)
         portfolio_id = initial_state.get("portfolio_id", "unknown")
         req_type = initial_state.get("request_type", "full_portfolio_check")
